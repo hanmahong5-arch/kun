@@ -116,6 +116,8 @@ function Projects() {
   let filteredProjects = projects.filter((project) => {
     // 默认隐藏归档项目，除非开启显示归档项目开关
     if (!showArchived && project.is_archived) return false
+    // 隐藏"已中标"和"放弃跟踪"状态的项目
+    if (project.stage === '已中标' || project.stage === '放弃跟踪') return false
     if (classFilter !== 'all' && project.classification !== classFilter) return false
     if (personFilter !== 'all' && project.responsible_person_id !== personFilter) return false
     if (searchKeyword && !project.name.includes(searchKeyword)) return false
