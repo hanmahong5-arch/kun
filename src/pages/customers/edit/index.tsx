@@ -5,6 +5,11 @@ import {useAuth} from '@/contexts/AuthContext'
 import {getCustomerById, updateCustomer, getAllProfiles} from '@/db/api'
 import type {CustomerType, CustomerClassification, ContactInfo} from '@/db/types'
 
+type ResponsiblePerson = {
+  user_id: string
+  role: 'primary' | 'assistant'
+}
+
 export default function EditCustomer() {
   const {profile} = useAuth()
   const [loading, setLoading] = useState(true)
@@ -20,7 +25,7 @@ export default function EditCustomer() {
   const [companyDevelopment, setCompanyDevelopment] = useState('')
   const [cooperationDirection, setCooperationDirection] = useState('')
   const [cooperationHistory, setCooperationHistory] = useState('')
-  const [responsiblePersonIds, setResponsiblePersonIds] = useState<string[]>([])
+  const [responsiblePersons, setResponsiblePersons] = useState<ResponsiblePerson[]>([])
 
   // 联系人信息
   const [decisionContacts, setDecisionContacts] = useState<ContactInfo[]>([])
@@ -57,8 +62,20 @@ export default function EditCustomer() {
         setDecisionContacts(data.decision_contacts || [])
         setInfluenceContacts(data.influence_contacts || [])
         setExecutionContacts(data.execution_contacts || [])
-        // 加载负责人列表
-        setResponsiblePersonIds(data.responsible_person_ids || (data.responsible_person_id ? [data.responsible_person_id] : []))
+        // 加载负责人列表（优先使用responsible_persons，后备使用responsible_person_ids）
+        if (data.responsible_persons && Array.isArray(data.responsible_persons)) {
+          setResponsiblePersons(data.responsible_persons)
+        } else if (data.responsible_person_ids && Array.isArray(data.responsible_person_ids)) {
+          // 兼容旧数据：第一个设为主负责人，其余设为协助负责人
+          setResponsiblePersons(
+            data.responsible_person_ids.map((id: string, idx: number) => ({
+              user_id: id,
+              role: idx === 0 ? 'primary' : 'assistant'
+            }))
+          )
+        } else if (data.responsible_person_id) {
+          setResponsiblePersons([{user_id: data.responsible_person_id, role: 'primary'}])
+        }
       }
     } catch (error) {
       console.error('加载客户信息失败:', error)
@@ -78,21 +95,32 @@ export default function EditCustomer() {
 
   // 切换负责人选择
   const togglePersonSelection = (userId: string) => {
-    if (responsiblePersonIds.includes(userId)) {
-      setResponsiblePersonIds(responsiblePersonIds.filter((id) => id !== userId))
+    const exists = responsiblePersons.find((p) => p.user_id === userId)
+    if (exists) {
+      setResponsiblePersons(responsiblePersons.filter((p) => p.user_id !== userId))
     } else {
-      setResponsiblePersonIds([...responsiblePersonIds, userId])
+      // 默认添加为协助负责人
+      setResponsiblePersons([...responsiblePersons, {user_id: userId, role: 'assistant'}])
     }
+  }
+
+  // 切换负责人权限
+  const togglePersonRole = (userId: string) => {
+    setResponsiblePersons(
+      responsiblePersons.map((p) =>
+        p.user_id === userId ? {...p, role: p.role === 'primary' ? 'assistant' : 'primary'} : p
+      )
+    )
   }
 
   // 清空负责人选择
   const clearPersonSelection = () => {
-    setResponsiblePersonIds([])
+    setResponsiblePersons([])
   }
 
   // 移除单个负责人标签
   const removePersonTag = (userId: string) => {
-    setResponsiblePersonIds(responsiblePersonIds.filter((id) => id !== userId))
+    setResponsiblePersons(responsiblePersons.filter((p) => p.user_id !== userId))
   }
 
   // 添加联系人
@@ -149,8 +177,16 @@ export default function EditCustomer() {
       return
     }
 
+    // 校验至少有一个主负责人
+    const hasPrimary = responsiblePersons.some((p) => p.role === 'primary')
+    if (!hasPrimary) {
+      Taro.showToast({title: '至少需要一个主负责人', icon: 'none'})
+      return
+    }
+
     setSubmitting(true)
     try {
+      const userIds = responsiblePersons.map((p) => p.user_id)
       await updateCustomer(customerId, {
         name,
         type,
@@ -162,7 +198,8 @@ export default function EditCustomer() {
         company_development: companyDevelopment || null,
         cooperation_direction: cooperationDirection || null,
         cooperation_history: cooperationHistory || null,
-        responsible_person_ids: responsiblePersonIds.length > 0 ? responsiblePersonIds : [profile.id]
+        responsible_person_ids: userIds.length > 0 ? userIds : [profile.id],
+        responsible_persons: responsiblePersons.length > 0 ? responsiblePersons : [{user_id: profile.id, role: 'primary'}]
       })
 
       Taro.showToast({title: '更新成功', icon: 'success'})
@@ -396,12 +433,12 @@ export default function EditCustomer() {
         <div>
           <div className="flex items-center justify-between mb-2">
             <div className="text-xl text-foreground">客户负责人</div>
-            {responsiblePersonIds.length > 0 && (
+            {responsiblePersons.length > 0 && (
               <button
                 type="button"
                 onClick={clearPersonSelection}
                 className={`text-sm text-primary flex items-center gap-1 leading-none transition-opacity ${
-                  responsiblePersonIds.length > 0 ? 'opacity-100' : 'opacity-0 pointer-events-none'
+                  responsiblePersons.length > 0 ? 'opacity-100' : 'opacity-0 pointer-events-none'
                 }`}>
                 <div className="i-mdi-close-circle text-base" />
                 <span>清空</span>
@@ -415,7 +452,7 @@ export default function EditCustomer() {
             onClick={() => setShowPersonSelector(true)}
             className="w-full border-2 border-input rounded px-4 py-3 bg-card flex items-center justify-between">
             <span className="text-xl text-foreground">
-              {responsiblePersonIds.length === 0 ? '请选择负责人' : `已选 ${responsiblePersonIds.length} 人`}
+              {responsiblePersons.length === 0 ? '请选择负责人' : `已选 ${responsiblePersons.length} 人`}
             </span>
             <div className="i-mdi-chevron-down text-2xl text-muted-foreground" />
           </button>
@@ -423,18 +460,27 @@ export default function EditCustomer() {
           {/* 已选标签 */}
           <div 
             className={`flex flex-wrap gap-2 mt-3 transition-opacity ${
-              responsiblePersonIds.length > 0 ? 'opacity-100' : 'opacity-0 h-0 overflow-hidden'
+              responsiblePersons.length > 0 ? 'opacity-100' : 'opacity-0 h-0 overflow-hidden'
             }`}>
-            {responsiblePersonIds.map((userId) => {
-              const user = allUsers.find((u) => u.id === userId)
+            {responsiblePersons.map((person) => {
+              const user = allUsers.find((u) => u.id === person.user_id)
               return (
                 <div
-                  key={userId}
+                  key={person.user_id}
                   className="px-3 py-2 bg-primary/10 text-primary rounded flex items-center gap-2 leading-none">
                   <span className="text-base">{user?.name || user?.phone || '未知用户'}</span>
+                  <span className={`text-xs px-2 py-1 rounded ${person.role === 'primary' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>
+                    {person.role === 'primary' ? '主' : '协'}
+                  </span>
                   <button
                     type="button"
-                    onClick={() => removePersonTag(userId)}
+                    onClick={() => togglePersonRole(person.user_id)}
+                    className="i-mdi-swap-horizontal text-lg flex items-center justify-center leading-none"
+                    title="切换权限"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removePersonTag(person.user_id)}
                     className="i-mdi-close text-lg flex items-center justify-center leading-none"
                   />
                 </div>
@@ -576,25 +622,39 @@ export default function EditCustomer() {
 
           {/* 选项列表 */}
           <div className="px-6 py-4">
-            {allUsers.map((user) => (
-              <button
-                key={user.id}
-                type="button"
-                onClick={() => togglePersonSelection(user.id)}
-                className="w-full flex items-center justify-between py-3 border-b border-border">
-                <span className="text-xl text-foreground">{user.name || user.phone || '未命名'}</span>
-                <div
-                  className={`w-6 h-6 rounded border-2 flex items-center justify-center ${
-                    responsiblePersonIds.includes(user.id)
-                      ? 'bg-primary border-primary'
-                      : 'border-input'
-                  }`}>
-                  {responsiblePersonIds.includes(user.id) && (
-                    <div className="i-mdi-check text-lg text-primary-foreground" />
+            {allUsers.map((user) => {
+              const person = responsiblePersons.find((p) => p.user_id === user.id)
+              const isSelected = !!person
+              return (
+                <div key={user.id} className="flex items-center justify-between py-3 border-b border-border">
+                  <button
+                    type="button"
+                    onClick={() => togglePersonSelection(user.id)}
+                    className="flex-1 flex items-center gap-3">
+                    <div
+                      className={`w-6 h-6 rounded border-2 flex items-center justify-center ${
+                        isSelected ? 'bg-primary border-primary' : 'border-input'
+                      }`}>
+                      {isSelected && <div className="i-mdi-check text-lg text-primary-foreground" />}
+                    </div>
+                    <span className="text-xl text-foreground">{user.name || user.phone || '未命名'}</span>
+                  </button>
+                  {isSelected && (
+                    <button
+                      type="button"
+                      onClick={() => togglePersonRole(user.id)}
+                      className={`px-3 py-1 rounded text-sm flex items-center gap-1 leading-none ${
+                        person.role === 'primary'
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-muted text-muted-foreground'
+                      }`}>
+                      <span>{person.role === 'primary' ? '主负责人' : '协助负责人'}</span>
+                      <div className="i-mdi-swap-horizontal text-base" />
+                    </button>
                   )}
                 </div>
-              </button>
-            ))}
+              )
+            })}
           </div>
 
           {/* 底部操作 */}
@@ -609,7 +669,7 @@ export default function EditCustomer() {
               type="button"
               onClick={() => setShowPersonSelector(false)}
               className="flex-1 py-3 bg-primary text-primary-foreground text-xl rounded flex items-center justify-center leading-none">
-              确定（已选{responsiblePersonIds.length}人）
+              确定（已选{responsiblePersons.length}人）
             </button>
           </div>
         </div>
