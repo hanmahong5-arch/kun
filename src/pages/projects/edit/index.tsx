@@ -4,7 +4,7 @@ import Taro, {useDidShow} from '@tarojs/taro'
 import {Picker} from '@tarojs/components'
 import {useAuth} from '@/contexts/AuthContext'
 import {supabase} from '@/client/supabase'
-import {createProjectTrackingRecord, getProjectTrackingRecords} from '@/db/api'
+import {createProjectTrackingRecord, getProjectTrackingRecords, getAllProfiles} from '@/db/api'
 import type {ProjectClassification, ProjectStage} from '@/db/types'
 
 export default function EditProject() {
@@ -13,6 +13,7 @@ export default function EditProject() {
   const [saving, setSaving] = useState(false)
   const [project, setProject] = useState<any>(null)
   const [trackingRecords, setTrackingRecords] = useState<any[]>([])
+  const [allUsers, setAllUsers] = useState<any[]>([])
 
   const projectId = useMemo(() => {
     const instance = Taro.getCurrentInstance()
@@ -29,6 +30,7 @@ export default function EditProject() {
   const [trackingProgress, setTrackingProgress] = useState('')
   const [stage, setStage] = useState<ProjectStage>('方案设计')
   const [expectedOpeningDate, setExpectedOpeningDate] = useState('')
+  const [responsiblePersonId, setResponsiblePersonId] = useState('')
 
   const classificationOptions: {value: ProjectClassification; label: string}[] = [
     {value: 'a_lock', label: 'A锁项目'},
@@ -58,6 +60,11 @@ export default function EditProject() {
 
     try {
       setLoading(true)
+      
+      // 加载用户列表
+      const users = await getAllProfiles()
+      setAllUsers(Array.isArray(users) ? users : [])
+      
       const {data: projectData, error: projectError} = await supabase
         .from('projects')
         .select('*')
@@ -80,6 +87,7 @@ export default function EditProject() {
       setProjectOverview(projectData.project_overview || '')
       setStage(projectData.stage || '方案设计')
       setExpectedOpeningDate(projectData.expected_opening_date || '')
+      setResponsiblePersonId(projectData.responsible_person_id || '')
 
       // 加载跟踪记录
       const records = await getProjectTrackingRecords(projectId)
@@ -128,6 +136,7 @@ export default function EditProject() {
         investment_amount: investmentAmount ? parseFloat(investmentAmount) * 10000 : null,
         project_overview: projectOverview || null,
         stage,
+        responsible_person_id: responsiblePersonId || project.responsible_person_id,
         expected_opening_date: expectedOpeningDate || null
       }
 
@@ -315,6 +324,30 @@ export default function EditProject() {
               className="w-full text-xl text-foreground bg-transparent outline-none"
             />
           </div>
+        </div>
+
+        {/* 项目负责人 */}
+        <div>
+          <div className="text-xl text-foreground mb-2">项目负责人</div>
+          <Picker
+            mode="selector"
+            range={allUsers.map((u) => u.name || u.phone || '未命名')}
+            value={allUsers.findIndex((u) => u.id === responsiblePersonId)}
+            disabled={!canEdit}
+            onChange={(e: any) => {
+              const ev = e as unknown
+              const value = (ev as {detail?: {value?: number}}).detail?.value ?? 0
+              setResponsiblePersonId(allUsers[value]?.id || '')
+            }}>
+            <div className="border-2 border-input rounded px-4 py-3 bg-card flex items-center justify-between">
+              <span className="text-xl text-foreground">
+                {allUsers.find((u) => u.id === responsiblePersonId)?.name ||
+                  allUsers.find((u) => u.id === responsiblePersonId)?.phone ||
+                  '请选择负责人'}
+              </span>
+              <div className="i-mdi-chevron-down text-2xl text-muted-foreground" />
+            </div>
+          </Picker>
         </div>
 
         {/* 工程概况 */}

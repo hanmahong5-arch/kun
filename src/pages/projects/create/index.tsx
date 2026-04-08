@@ -1,14 +1,15 @@
-import {useState} from 'react'
+import {useState, useEffect, useCallback} from 'react'
 import Taro from '@tarojs/taro'
 import {Picker} from '@tarojs/components'
 import {useAuth} from '@/contexts/AuthContext'
 import {supabase} from '@/client/supabase'
-import {createProjectTrackingRecord} from '@/db/api'
+import {createProjectTrackingRecord, getAllProfiles} from '@/db/api'
 import type {ProjectClassification, ProjectStage} from '@/db/types'
 
 export default function CreateProject() {
   const {profile} = useAuth()
   const [loading, setLoading] = useState(false)
+  const [allUsers, setAllUsers] = useState<any[]>([])
 
   // 表单数据
   const [name, setName] = useState('')
@@ -20,6 +21,25 @@ export default function CreateProject() {
   const [trackingProgress, setTrackingProgress] = useState('')
   const [stage, setStage] = useState<ProjectStage>('方案设计')
   const [expectedOpeningDate, setExpectedOpeningDate] = useState('')
+  const [responsiblePersonId, setResponsiblePersonId] = useState('')
+
+  // 加载所有用户
+  const loadUsers = useCallback(async () => {
+    try {
+      const users = await getAllProfiles()
+      setAllUsers(Array.isArray(users) ? users : [])
+      // 默认选择当前用户
+      if (profile?.id) {
+        setResponsiblePersonId(profile.id as string)
+      }
+    } catch (error) {
+      console.error('加载用户列表失败:', error)
+    }
+  }, [profile])
+
+  useEffect(() => {
+    loadUsers()
+  }, [loadUsers])
 
   const classificationOptions: {value: ProjectClassification; label: string}[] = [
     {value: 'a_lock', label: 'A锁项目'},
@@ -64,7 +84,7 @@ export default function CreateProject() {
         investment_amount: investmentAmount ? parseFloat(investmentAmount) * 10000 : null,
         project_overview: projectOverview || null,
         stage,
-        responsible_person_id: profile.id,
+        responsible_person_id: responsiblePersonId || profile.id,
         expected_opening_date: expectedOpeningDate || null
       }
 
@@ -216,6 +236,29 @@ export default function CreateProject() {
               className="w-full text-xl text-foreground bg-transparent outline-none"
             />
           </div>
+        </div>
+
+        {/* 项目负责人 */}
+        <div>
+          <div className="text-xl text-foreground mb-2">项目负责人</div>
+          <Picker
+            mode="selector"
+            range={allUsers.map((u) => u.name || u.phone || '未命名')}
+            value={allUsers.findIndex((u) => u.id === responsiblePersonId)}
+            onChange={(e: any) => {
+              const ev = e as unknown
+              const value = (ev as {detail?: {value?: number}}).detail?.value ?? 0
+              setResponsiblePersonId(allUsers[value]?.id || '')
+            }}>
+            <div className="border-2 border-input rounded px-4 py-3 bg-card flex items-center justify-between">
+              <span className="text-xl text-foreground">
+                {allUsers.find((u) => u.id === responsiblePersonId)?.name ||
+                  allUsers.find((u) => u.id === responsiblePersonId)?.phone ||
+                  '请选择负责人'}
+              </span>
+              <div className="i-mdi-chevron-down text-2xl text-muted-foreground" />
+            </div>
+          </Picker>
         </div>
 
         {/* 工程概况 */}
