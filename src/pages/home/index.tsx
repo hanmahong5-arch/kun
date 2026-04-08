@@ -1,0 +1,1098 @@
+import {useCallback, useEffect, useState} from 'react'
+import Taro, {useDidShow} from '@tarojs/taro'
+import {withRouteGuard} from '@/components/RouteGuard'
+import {useAuth} from '@/contexts/AuthContext'
+import {supabase} from '@/client/supabase'
+import {getAllProjects, getAnnualTarget, updateAnnualTarget, getAssignedTasksStats, getAssignedTasks} from '@/db/api'
+import {isLeader, isAdmin, isLeaderOrAdmin} from '@/db/permissions-utils'
+import TeamGoals from '@/components/TeamGoals'
+import type {Project, HomeFeaturedBiddingProject} from '@/db/types'
+
+interface TaskStats {
+  total: number
+  pending: number
+  in_progress: number
+  completed: number
+  overdue: number
+}
+
+interface ProjectWithBidding extends Project {
+  bidding_info?: Array<{
+    id: string
+    opening_date: string | null
+    bidding_unit: string
+    bidding_limit: number | null
+    result_amount: number | null
+  }>
+}
+
+function Home() {
+  const {profile} = useAuth()
+  const [projects, setProjects] = useState<Project[]>([])
+  const [loading, setLoading] = useState(true)
+  const [annualTarget, setAnnualTarget] = useState<number>(0)
+  const [showEditTarget, setShowEditTarget] = useState(false)
+  const [editTargetValue, setEditTargetValue] = useState('')
+  
+  // 本月计划开标项目相关状态
+  const [featuredBiddingProjects, setFeaturedBiddingProjects] = useState<ProjectWithBidding[]>([])
+  const [showProjectSelector, setShowProjectSelector] = useState(false)
+  const [availableProjects, setAvailableProjects] = useState<ProjectWithBidding[]>([])
+  const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([])
+  
+  // 任务统计相关状态
+  const [taskStats, setTaskStats] = useState<TaskStats>({
+    total: 0,
+    pending: 0,
+    in_progress: 0,
+    completed: 0,
+    overdue: 0
+  })
+  const [showTaskFilter, setShowTaskFilter] = useState(false)
+  const [taskFilter, setTaskFilter] = useState({
+    status: '',
+    priority: '',
+    assignee: '',
+    sortBy: 'created_at' as 'deadline' | 'priority' | 'created_at'
+  })
+  const [filteredTasks, setFilteredTasks] = useState<any[]>([])
+  const [users, setUsers] = useState<Array<{id: string; name: string}>>([])
+
+  const isLeaderRole = isLeader(profile)
+  const isAdminRole = isAdmin(profile)
+  const hasDataCenterAccess = isLeaderOrAdmin(profile)
+
+  const loadData = useCallback(async () => {
+    if (!profile) return
+
+    try {
+      setLoading(true)
+      
+      // 加载项目数据
+      const projectsData = await getAllProjects()
+      setProjects(Array.isArray(projectsData) ? projectsData : [])
+
+      // 加载年度目标
+      const currentYear = new Date().getFullYear()
+      const targetData = await getAnnualTarget(currentYear)
+      if (targetData) {
+        setAnnualTarget(targetData.target_amount)
+      }
+
+      // 加载本月计划开标项目
+      await loadFeaturedBiddingProjects()
+
+      // 如果是领导，加载任务统计和用户列表
+      if (isLeaderRole) {
+        const stats = await getAssignedTasksStats(profile.id as string)
+        setTaskStats(stats)
+        
+        // 加载所有用户列表用于筛选
+        const {data: usersData} = await supabase
+          .from('profiles')
+          .select('id, name')
+          .eq('status', 'approved')
+          .order('name')
+        
+        if (usersData) {
+          setUsers(usersData)
+        }
+      }
+    } catch (error) {
+      console.error('加载数据失败:', error)
+      Taro.showToast({title: '加载数据失败', icon: 'none'})
+    } finally {
+      setLoading(false)
+    }
+  }, [profile, isLeader])
+
+  // 加载本月计划开标项目
+  const loadFeaturedBiddingProjects = useCallback(async () => {
+    try {
+      const {data, error} = await supabase
+        .from('home_featured_bidding_projects')
+        .select(`
+          id,
+          project_id,
+          display_order,
+          projects!inner (
+            id,
+            name,
+            construction_unit,
+            project_type,
+            stage,
+            expected_opening_date,
+            investment_amount,
+            bidding_info (
+              id,
+              opening_date,
+              bidding_unit,
+              bidding_limit,
+              result_amount
+            )
+          )
+        `)
+        .order('display_order')
+
+      if (error) throw error
+
+      // 转换数据格式
+      const formattedData = (data || []).map(item => ({
+        ...(item.projects as any),
+        bidding_info: (item.projects as any).bidding_info || []
+      }))
+
+      setFeaturedBiddingProjects(formattedData)
+    } catch (error) {
+      console.error('加载本月计划开标项目失败:', error)
+    }
+  }, [])
+
+  // 加载可选的项目列表（本月有预计开标日期的项目）
+  const loadAvailableProjects = useCallback(async () => {
+    try {
+      const now = new Date()
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
+      const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+
+      const {data, error} = await supabase
+        .from('projects')
+        .select(`
+          id,
+          name,
+          construction_unit,
+          project_type,
+          stage,
+          expected_opening_date,
+          investment_amount,
+          bidding_info (
+            id,
+            opening_date,
+            bidding_unit,
+            bidding_limit,
+            result_amount
+          )
+        `)
+        .gte('expected_opening_date', startOfMonth.toISOString().split('T')[0])
+        .lte('expected_opening_date', endOfMonth.toISOString().split('T')[0])
+        .order('expected_opening_date')
+
+      if (error) throw error
+
+      setAvailableProjects(data as ProjectWithBidding[] || [])
+    } catch (error) {
+      console.error('加载可选项目失败:', error)
+    }
+  }, [])
+
+  useDidShow(() => {
+    loadData()
+  })
+
+  useEffect(() => {
+    loadData()
+  }, [loadData])
+
+  // 筛选投标阶段的项目
+  const biddingProjects = projects.filter((p) => p.stage === '投标阶段')
+
+  // 筛选已中标项目
+  const wonProjects = projects.filter((p) => p.stage === '已中标')
+
+  // 计算中标合同额
+  const totalWonAmount = wonProjects.reduce((sum, p) => sum + (p.investment_amount || 0), 0)
+
+  // 计算目标差额
+  const targetGap = annualTarget - totalWonAmount
+
+  // 修改年度目标
+  const handleUpdateTarget = async () => {
+    if (!profile || !editTargetValue) return
+
+    const newTargetInYi = parseFloat(editTargetValue)
+    if (isNaN(newTargetInYi) || newTargetInYi <= 0) {
+      Taro.showToast({title: '请输入有效的目标金额', icon: 'none'})
+      return
+    }
+
+    try {
+      const currentYear = new Date().getFullYear()
+      // 将亿元转换为万元存储
+      const newTargetInWan = newTargetInYi * 10000
+      await updateAnnualTarget(currentYear, newTargetInWan, profile.id as string)
+      setAnnualTarget(newTargetInWan)
+      setShowEditTarget(false)
+      setEditTargetValue('')
+      Taro.showToast({title: '目标更新成功', icon: 'success'})
+    } catch (error) {
+      console.error('更新目标失败:', error)
+      Taro.showToast({title: '更新失败', icon: 'none'})
+    }
+  }
+
+  const handleViewProject = (id: string) => {
+    Taro.navigateTo({url: `/pages/projects/detail/index?id=${id}`})
+  }
+
+  const handleViewTask = (id: string) => {
+    Taro.navigateTo({url: `/pages/tasks/detail/index?id=${id}`})
+  }
+
+  const handleAssignTask = () => {
+    Taro.navigateTo({url: '/pages/tasks/assign/index'})
+  }
+
+  // 打开项目选择器
+  const handleOpenProjectSelector = async () => {
+    await loadAvailableProjects()
+    
+    // 加载当前已选择的项目ID
+    try {
+      const {data, error} = await supabase
+        .from('home_featured_bidding_projects')
+        .select('project_id')
+      
+      if (error) throw error
+      
+      setSelectedProjectIds((data || []).map(item => item.project_id))
+    } catch (error) {
+      console.error('加载已选项目失败:', error)
+      setSelectedProjectIds([])
+    }
+    
+    setShowProjectSelector(true)
+  }
+
+  // 切换项目选择
+  const toggleProjectSelection = (projectId: string) => {
+    setSelectedProjectIds(prev => {
+      if (prev.includes(projectId)) {
+        return prev.filter(id => id !== projectId)
+      } else {
+        return [...prev, projectId]
+      }
+    })
+  }
+
+  // 保存项目选择
+  const handleSaveProjectSelection = async () => {
+    if (!profile) return
+
+    try {
+      setLoading(true)
+
+      // 删除所有现有的展示项目
+      await supabase
+        .from('home_featured_bidding_projects')
+        .delete()
+        .neq('id', '00000000-0000-0000-0000-000000000000')
+
+      // 添加新选择的项目
+      if (selectedProjectIds.length > 0) {
+        const records = selectedProjectIds.map((projectId, index) => ({
+          project_id: projectId,
+          display_order: index,
+          created_by: profile.id
+        }))
+
+        const {error} = await supabase
+          .from('home_featured_bidding_projects')
+          .insert(records)
+
+        if (error) throw error
+      }
+
+      Taro.showToast({title: '保存成功', icon: 'success'})
+      setShowProjectSelector(false)
+      await loadFeaturedBiddingProjects()
+    } catch (error) {
+      console.error('保存失败:', error)
+      Taro.showToast({title: '保存失败', icon: 'none'})
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // 移除展示项目
+  const handleRemoveFeaturedProject = async (projectId: string) => {
+    const result = await Taro.showModal({
+      title: '确认移除',
+      content: '确定要从首页移除此项目吗？',
+      confirmText: '移除',
+      cancelText: '取消'
+    })
+
+    if (!result.confirm) return
+
+    try {
+      const {error} = await supabase
+        .from('home_featured_bidding_projects')
+        .delete()
+        .eq('project_id', projectId)
+
+      if (error) throw error
+
+      Taro.showToast({title: '移除成功', icon: 'success'})
+      await loadFeaturedBiddingProjects()
+    } catch (error) {
+      console.error('移除失败:', error)
+      Taro.showToast({title: '移除失败', icon: 'none'})
+    }
+  }
+
+  const handleApplyTaskFilter = async () => {
+    if (!profile || !isLeaderRole) return
+
+    try {
+      const tasks = await getAssignedTasks(profile.id as string, taskFilter)
+      setFilteredTasks(tasks)
+      setShowTaskFilter(false)
+    } catch (error) {
+      console.error('加载任务失败:', error)
+      Taro.showToast({title: '加载失败', icon: 'none'})
+    }
+  }
+
+  const handleResetTaskFilter = () => {
+    setTaskFilter({
+      status: '',
+      priority: '',
+      assignee: '',
+      sortBy: 'created_at'
+    })
+    setFilteredTasks([])
+  }
+
+  const getStatusLabel = (status: string) => {
+    const labels: Record<string, string> = {
+      pending: '待执行',
+      in_progress: '进行中',
+      completed: '已完成',
+      overdue: '已逾期'
+    }
+    return labels[status] || status
+  }
+
+  const getPriorityLabel = (priority: string) => {
+    const labels: Record<string, string> = {
+      high: '高',
+      medium: '中',
+      low: '低'
+    }
+    return labels[priority] || priority
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-xl text-muted-foreground">加载中...</div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="min-h-screen bg-background pb-6">
+      {/* 头部 */}
+      <div className="bg-gradient-primary px-6 py-6">
+        <div className="text-2xl text-primary-foreground font-bold">市场经营管理</div>
+        <div className="text-base text-primary-foreground/80 mt-1">欢迎回来，{String(profile?.name || '用户')}</div>
+      </div>
+
+      {/* 年度经营目标模块 */}
+      <div className="px-6 mt-4">
+        <div className="bg-card rounded p-5 border border-border">
+          <div className="flex items-center justify-between mb-4">
+            <div className="text-xl text-foreground font-bold">年度经营目标</div>
+            {isAdminRole && (
+              <button
+                type="button"
+                onClick={() => {
+                  // 将万元转换为亿元显示
+                  setEditTargetValue((annualTarget / 10000).toFixed(2))
+                  setShowEditTarget(true)
+                }}
+                className="px-4 py-2 bg-primary text-primary-foreground text-base rounded flex items-center justify-center leading-none">
+                <div className="i-mdi-pencil text-xl mr-1" />
+                修改目标
+              </button>
+            )}
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            <div className="bg-gradient-primary rounded p-4">
+              <div className="text-base text-primary-foreground/80 mb-1">年度目标</div>
+              <div className="text-2xl text-primary-foreground font-bold">{(annualTarget / 10000).toFixed(2)}</div>
+              <div className="text-base text-primary-foreground/80 mt-1">亿元</div>
+            </div>
+            <div className="bg-gradient-subtle rounded p-4">
+              <div className="text-base text-muted-foreground mb-1">已中标额</div>
+              <div className="text-2xl text-foreground font-bold">{(totalWonAmount / 10000).toFixed(2)}</div>
+              <div className="text-base text-muted-foreground mt-1">亿元</div>
+            </div>
+            <div className={`rounded p-4 ${targetGap > 0 ? 'bg-warning/10' : 'bg-success/10'}`}>
+              <div className="text-base text-muted-foreground mb-1">目标差额</div>
+              <div className={`text-2xl font-bold ${targetGap > 0 ? 'text-warning' : 'text-success'}`}>
+                {targetGap > 0 ? '+' : ''}{(targetGap / 10000).toFixed(2)}
+              </div>
+              <div className="text-base text-muted-foreground mt-1">亿元</div>
+            </div>
+          </div>
+
+          {/* 完成率进度条 */}
+          <div className="mt-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-base text-muted-foreground">目标完成率</span>
+              <span className="text-base text-foreground font-bold">
+                {annualTarget > 0 ? ((totalWonAmount / annualTarget) * 100).toFixed(1) : 0}%
+              </span>
+            </div>
+            <div className="w-full h-3 bg-muted rounded-full overflow-hidden">
+              <div
+                className="h-full bg-gradient-primary transition-all"
+                style={{width: `${annualTarget > 0 ? Math.min((totalWonAmount / annualTarget) * 100, 100) : 0}%`}}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 小组年度目标模块 */}
+      <div className="px-6 mt-4">
+        <div className="bg-gradient-subtle rounded p-5 border border-border">
+          <div className="flex items-center justify-between mb-4">
+            <div className="text-xl text-foreground font-bold">小组年度目标</div>
+            {isAdminRole && (
+              <button
+                type="button"
+                onClick={() => Taro.navigateTo({url: '/pages/teams/index'})}
+                className="px-4 py-2 bg-primary text-primary-foreground text-base rounded flex items-center justify-center leading-none">
+                <div className="i-mdi-cog text-xl mr-1" />
+                管理小组
+              </button>
+            )}
+          </div>
+          {profile && <TeamGoals isAdmin={isAdminRole} userId={profile.id as string} />}
+        </div>
+      </div>
+
+      {/* 快捷入口 */}
+      <div className="px-6 mt-4">
+        <div className="text-xl text-foreground font-bold mb-3">快捷入口</div>
+        <div className="grid grid-cols-3 gap-3">
+          {/* 领导数据中心（领导和管理员可见） */}
+          {hasDataCenterAccess && (
+            <button
+              type="button"
+              onClick={() => Taro.navigateTo({url: '/pages/leader/dashboard/index'})}
+              className="py-4 bg-gradient-primary rounded flex flex-col items-center justify-center gap-2 border border-primary/20">
+              <div className="i-mdi-chart-box text-3xl text-primary-foreground" />
+              <span className="text-base text-primary-foreground font-bold">数据中心</span>
+            </button>
+          )}
+
+          {/* 系统设置（仅管理员可见） */}
+          {isAdminRole && (
+            <button
+              type="button"
+              onClick={() => Taro.navigateTo({url: '/pages/system/settings/index'})}
+              className="py-4 bg-card border-2 border-border rounded flex flex-col items-center justify-center gap-2">
+              <div className="i-mdi-cog text-3xl text-primary" />
+              <span className="text-base text-foreground">系统设置</span>
+            </button>
+          )}
+
+          {/* 工作汇报 */}
+          <button
+            type="button"
+            onClick={() => Taro.navigateTo({url: '/pages/reports/index'})}
+            className="py-4 bg-card border-2 border-border rounded flex flex-col items-center justify-center gap-2">
+            <div className="i-mdi-file-document-edit text-3xl text-primary" />
+            <span className="text-base text-foreground">工作汇报</span>
+          </button>
+
+          {/* 项目管理 */}
+          <button
+            type="button"
+            onClick={() => Taro.navigateTo({url: '/pages/projects/index'})}
+            className="py-4 bg-card border-2 border-border rounded flex flex-col items-center justify-center gap-2">
+            <div className="i-mdi-briefcase text-3xl text-primary" />
+            <span className="text-base text-foreground">项目管理</span>
+          </button>
+
+          {/* 客户管理 */}
+          <button
+            type="button"
+            onClick={() => Taro.navigateTo({url: '/pages/customers/index'})}
+            className="py-4 bg-card border-2 border-border rounded flex flex-col items-center justify-center gap-2">
+            <div className="i-mdi-account-group text-3xl text-primary" />
+            <span className="text-base text-foreground">客户管理</span>
+          </button>
+
+          {/* 任务管理 */}
+          <button
+            type="button"
+            onClick={() => Taro.navigateTo({url: '/pages/tasks/index'})}
+            className="py-4 bg-card border-2 border-border rounded flex flex-col items-center justify-center gap-2">
+            <div className="i-mdi-clipboard-check text-3xl text-primary" />
+            <span className="text-base text-foreground">任务管理</span>
+          </button>
+
+          {/* 投标管理 */}
+          <button
+            type="button"
+            onClick={() => Taro.navigateTo({url: '/pages/bids/index'})}
+            className="py-4 bg-card border-2 border-border rounded flex flex-col items-center justify-center gap-2">
+            <div className="i-mdi-gavel text-3xl text-primary" />
+            <span className="text-base text-foreground">投标管理</span>
+          </button>
+
+          {/* 知识库 */}
+          <button
+            type="button"
+            onClick={() => Taro.navigateTo({url: '/pages/documents/index'})}
+            className="py-4 bg-card border-2 border-border rounded flex flex-col items-center justify-center gap-2">
+            <div className="i-mdi-book-open-variant text-3xl text-primary" />
+            <span className="text-base text-foreground">知识库</span>
+          </button>
+        </div>
+      </div>
+
+      {/* 任务统计看板（仅领导可见） */}
+      {isLeader && (
+        <div className="px-6 mt-4 mb-6">
+          <div className="bg-card rounded p-5 border border-border">
+            <div className="flex items-center justify-between mb-4">
+              <div className="text-xl text-foreground font-bold">任务统计</div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowTaskFilter(true)}
+                  className="px-4 py-2 bg-card border-2 border-primary text-primary text-base rounded flex items-center justify-center leading-none">
+                  <div className="i-mdi-filter text-xl mr-1" />
+                  筛选
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAssignTask}
+                  className="px-4 py-2 bg-primary text-primary-foreground text-base rounded flex items-center justify-center leading-none">
+                  <div className="i-mdi-plus text-xl mr-1" />
+                  指派任务
+                </button>
+              </div>
+            </div>
+
+            {/* 统计卡片 */}
+            <div className="grid grid-cols-5 gap-3 mb-4">
+              <div className="bg-gradient-primary rounded p-4">
+                <div className="text-base text-primary-foreground/80 mb-1">任务总数</div>
+                <div className="text-3xl text-primary-foreground font-bold">{taskStats.total}</div>
+              </div>
+              <div className="bg-muted/30 rounded p-4">
+                <div className="text-base text-muted-foreground mb-1">待执行</div>
+                <div className="text-3xl text-foreground font-bold">{taskStats.pending}</div>
+              </div>
+              <div className="bg-primary/10 rounded p-4">
+                <div className="text-base text-primary/80 mb-1">进行中</div>
+                <div className="text-3xl text-primary font-bold">{taskStats.in_progress}</div>
+              </div>
+              <div className="bg-success/10 rounded p-4">
+                <div className="text-base text-success/80 mb-1">已完成</div>
+                <div className="text-3xl text-success font-bold">{taskStats.completed}</div>
+              </div>
+              <div className="bg-destructive/10 rounded p-4">
+                <div className="text-base text-destructive/80 mb-1">已逾期</div>
+                <div className="text-3xl text-destructive font-bold">{taskStats.overdue}</div>
+              </div>
+            </div>
+
+            {/* 筛选后的任务列表 */}
+            {filteredTasks.length > 0 && (
+              <div className="border-t border-border pt-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="text-base text-foreground font-bold">筛选结果（{filteredTasks.length}）</div>
+                  <button
+                    type="button"
+                    onClick={handleResetTaskFilter}
+                    className="text-base text-primary">
+                    清除筛选
+                  </button>
+                </div>
+                <div className="flex flex-col gap-2">
+                  {filteredTasks.slice(0, 5).map((task) => (
+                    <div
+                      key={task.id}
+                      onClick={() => handleViewTask(task.id)}
+                      className="bg-background rounded p-3 border border-border flex items-center justify-between">
+                      <div className="flex-1">
+                        <div className="text-base text-foreground font-bold mb-1">{task.name}</div>
+                        <div className="text-sm text-muted-foreground">
+                          责任人：{task.profiles?.name || '未知'} | 截止：{new Date(task.deadline).toLocaleDateString()}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className={`px-2 py-1 rounded text-sm ${
+                          task.priority === 'high' ? 'bg-destructive/10 text-destructive' :
+                          task.priority === 'medium' ? 'bg-warning/10 text-warning' :
+                          'bg-success/10 text-success'
+                        }`}>
+                          {getPriorityLabel(task.priority)}
+                        </div>
+                        <div className={`px-2 py-1 rounded text-sm ${
+                          task.status === 'completed' ? 'bg-success/10 text-success' :
+                          task.status === 'in_progress' ? 'bg-primary/10 text-primary' :
+                          'bg-muted/30 text-muted-foreground'
+                        }`}>
+                          {getStatusLabel(task.status)}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  {filteredTasks.length > 5 && (
+                    <div className="text-center text-sm text-muted-foreground py-2">
+                      仅显示前5条，共{filteredTasks.length}条
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 本月计划开标项目 */}
+      <div className="px-6 mt-4 mb-6">
+        <div className="bg-card rounded p-5 border border-border">
+          <div className="flex items-center justify-between mb-4">
+            <div className="text-xl text-foreground font-bold">{new Date().getMonth() + 1}月份计划开标项目</div>
+            {isAdminRole && (
+              <button
+                type="button"
+                onClick={handleOpenProjectSelector}
+                className="px-4 py-2 bg-primary text-primary-foreground text-base rounded flex items-center justify-center leading-none">
+                <div className="i-mdi-cog text-xl mr-1" />
+                选择项目
+              </button>
+            )}
+          </div>
+
+          {featuredBiddingProjects.length === 0 ? (
+            <div className="text-center py-8">
+              <div className="i-mdi-calendar-clock text-6xl text-muted-foreground mb-2" />
+              <div className="text-base text-muted-foreground">暂无{new Date().getMonth() + 1}月计划开标项目</div>
+              {isAdminRole && (
+                <div className="text-sm text-muted-foreground mt-1">点击"选择项目"添加</div>
+              )}
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {featuredBiddingProjects.map((project) => {
+                const biddingInfo = project.bidding_info?.[0]
+                return (
+                  <div
+                    key={project.id}
+                    className="bg-background rounded p-4 border border-border">
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="flex-1">
+                        <div className="text-xl text-foreground font-bold mb-2">{project.name}</div>
+                        <div className="flex flex-col gap-1">
+                          <div className="text-base text-muted-foreground">
+                            <span className="text-foreground">建设单位：</span>
+                            {project.construction_unit}
+                          </div>
+                          {project.expected_opening_date && (
+                            <div className="text-base text-primary font-bold">
+                              <span className="i-mdi-calendar-clock mr-1" />
+                              预计开标时间：{new Date(project.expected_opening_date).toLocaleDateString('zh-CN')}
+                            </div>
+                          )}
+                          {project.investment_amount && (
+                            <div className="text-base text-success font-bold">
+                              <span className="i-mdi-currency-cny mr-1" />
+                              合同额：{(project.investment_amount / 10000).toFixed(2)} 亿元
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleViewProject(project.id)}
+                        className="flex-1 py-3 bg-card border-2 border-primary text-primary text-xl rounded flex items-center justify-center leading-none">
+                        <div className="i-mdi-eye text-2xl mr-2" />
+                        查看详情
+                      </button>
+                      {isAdminRole && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveFeaturedProject(project.id)}
+                          className="px-4 py-3 bg-destructive/10 text-destructive text-xl rounded flex items-center justify-center leading-none">
+                          <div className="i-mdi-close text-2xl" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 修改目标弹窗 */}
+      {showEditTarget && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-6">
+          <div className="bg-card rounded p-6 w-full max-w-md">
+            <div className="text-xl text-foreground font-bold mb-4">修改年度目标</div>
+            <div className="mb-4">
+              <div className="text-base text-muted-foreground mb-2">目标金额（亿元）</div>
+              <div className="border-2 border-input rounded px-4 py-3 bg-background">
+                <input
+                  type="number"
+                  value={editTargetValue}
+                  onInput={(e) => {
+                    const ev = e as unknown
+                    setEditTargetValue(
+                      (ev as {detail?: {value?: string}}).detail?.value ??
+                        (ev as {target?: {value?: string}}).target?.value ??
+                        ''
+                    )
+                  }}
+                  placeholder="请输入目标金额"
+                  className="w-full text-xl text-foreground bg-transparent outline-none"
+                />
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowEditTarget(false)
+                  setEditTargetValue('')
+                }}
+                className="flex-1 py-3 bg-card border-2 border-border text-foreground text-xl rounded flex items-center justify-center leading-none">
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={handleUpdateTarget}
+                className="flex-1 py-3 bg-primary text-primary-foreground text-xl rounded flex items-center justify-center leading-none">
+                确定
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 中标项目列表 */}
+      <div className="px-6 mt-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-xl text-foreground font-bold">已中标项目</div>
+          <div className="text-base text-muted-foreground">{wonProjects.length} 个项目</div>
+        </div>
+
+        {wonProjects.length === 0 ? (
+          <div className="bg-card rounded p-8 text-center border border-border">
+            <div className="i-mdi-trophy-outline text-6xl text-muted-foreground mb-2" />
+            <div className="text-base text-muted-foreground">暂无中标项目</div>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {wonProjects.map((project) => (
+              <div
+                key={project.id}
+                onClick={() => handleViewProject(project.id)}
+                className="bg-card rounded p-4 border border-border">
+                <div className="flex items-start justify-between mb-2">
+                  <div className="flex-1">
+                    <div className="text-xl text-foreground font-bold mb-1">{project.name}</div>
+                    <div className="text-base text-muted-foreground">{project.construction_unit}</div>
+                  </div>
+                  <div className="px-3 py-1 bg-success/10 text-success text-base rounded">已中标</div>
+                </div>
+                {project.investment_amount && (
+                  <div className="flex items-center gap-2 mt-3 pt-3 border-t border-border">
+                    <div className="i-mdi-currency-cny text-xl text-primary" />
+                    <span className="text-xl text-primary font-bold">{(project.investment_amount / 10000).toFixed(2)} 亿元</span>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      {/* 投标阶段项目 */}
+      <div className="px-6 mt-6">
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-xl text-foreground font-bold">投标阶段项目</div>
+          <div className="text-base text-muted-foreground">{biddingProjects.length} 个项目</div>
+        </div>
+
+        {biddingProjects.length === 0 ? (
+          <div className="bg-card rounded p-8 text-center border border-border">
+            <div className="i-mdi-file-document-outline text-6xl text-muted-foreground mb-2" />
+            <div className="text-base text-muted-foreground">暂无投标项目</div>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {biddingProjects.map((project) => (
+              <div
+                key={project.id}
+                onClick={() => handleViewProject(project.id)}
+                className="bg-card rounded p-4 border border-border">
+                <div className="flex items-start justify-between mb-2">
+                  <div className="flex-1">
+                    <div className="text-xl text-foreground font-bold mb-1">{project.name}</div>
+                    <div className="text-base text-muted-foreground">{project.construction_unit}</div>
+                  </div>
+                  <div className="px-3 py-1 bg-warning/10 text-warning text-base rounded">投标中</div>
+                </div>
+                <div className="flex items-center gap-4 mt-3 pt-3 border-t border-border">
+                  <div className="flex items-center gap-2">
+                    <div className="i-mdi-tag text-xl text-muted-foreground" />
+                    <span className="text-base text-foreground">{project.project_type}</span>
+                  </div>
+                  {project.investment_amount && (
+                    <div className="flex items-center gap-2">
+                      <div className="i-mdi-currency-cny text-xl text-muted-foreground" />
+                      <span className="text-base text-foreground">{(project.investment_amount / 10000).toFixed(2)} 亿元</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* 任务筛选弹窗 */}
+      {showTaskFilter && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-6">
+          <div className="bg-background rounded-lg w-full max-w-md">
+            <div className="px-6 py-4 border-b border-border">
+              <div className="text-2xl text-foreground font-bold">任务筛选</div>
+            </div>
+            <div className="px-6 py-4 flex flex-col gap-4">
+              {/* 状态筛选 */}
+              <div>
+                <div className="text-base text-foreground mb-2">任务状态</div>
+                <div className="grid grid-cols-4 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setTaskFilter({...taskFilter, status: ''})}
+                    className={`py-2 text-base rounded flex items-center justify-center leading-none ${
+                      taskFilter.status === '' ? 'bg-primary text-primary-foreground' : 'bg-card border border-border text-foreground'
+                    }`}>
+                    全部
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTaskFilter({...taskFilter, status: 'pending'})}
+                    className={`py-2 text-base rounded flex items-center justify-center leading-none ${
+                      taskFilter.status === 'pending' ? 'bg-primary text-primary-foreground' : 'bg-card border border-border text-foreground'
+                    }`}>
+                    待执行
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTaskFilter({...taskFilter, status: 'in_progress'})}
+                    className={`py-2 text-base rounded flex items-center justify-center leading-none ${
+                      taskFilter.status === 'in_progress' ? 'bg-primary text-primary-foreground' : 'bg-card border border-border text-foreground'
+                    }`}>
+                    进行中
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTaskFilter({...taskFilter, status: 'completed'})}
+                    className={`py-2 text-base rounded flex items-center justify-center leading-none ${
+                      taskFilter.status === 'completed' ? 'bg-primary text-primary-foreground' : 'bg-card border border-border text-foreground'
+                    }`}>
+                    已完成
+                  </button>
+                </div>
+              </div>
+
+              {/* 优先级筛选 */}
+              <div>
+                <div className="text-base text-foreground mb-2">优先级</div>
+                <div className="grid grid-cols-4 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setTaskFilter({...taskFilter, priority: ''})}
+                    className={`py-2 text-base rounded flex items-center justify-center leading-none ${
+                      taskFilter.priority === '' ? 'bg-primary text-primary-foreground' : 'bg-card border border-border text-foreground'
+                    }`}>
+                    全部
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTaskFilter({...taskFilter, priority: 'high'})}
+                    className={`py-2 text-base rounded flex items-center justify-center leading-none ${
+                      taskFilter.priority === 'high' ? 'bg-primary text-primary-foreground' : 'bg-card border border-border text-foreground'
+                    }`}>
+                    高
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTaskFilter({...taskFilter, priority: 'medium'})}
+                    className={`py-2 text-base rounded flex items-center justify-center leading-none ${
+                      taskFilter.priority === 'medium' ? 'bg-primary text-primary-foreground' : 'bg-card border border-border text-foreground'
+                    }`}>
+                    中
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTaskFilter({...taskFilter, priority: 'low'})}
+                    className={`py-2 text-base rounded flex items-center justify-center leading-none ${
+                      taskFilter.priority === 'low' ? 'bg-primary text-primary-foreground' : 'bg-card border border-border text-foreground'
+                    }`}>
+                    低
+                  </button>
+                </div>
+              </div>
+
+              {/* 责任人筛选 */}
+              <div>
+                <div className="text-base text-foreground mb-2">责任人</div>
+                <div className="grid grid-cols-3 gap-2 max-h-40 overflow-y-auto">
+                  <button
+                    type="button"
+                    onClick={() => setTaskFilter({...taskFilter, assignee: ''})}
+                    className={`py-2 text-base rounded flex items-center justify-center leading-none ${
+                      taskFilter.assignee === '' ? 'bg-primary text-primary-foreground' : 'bg-card border border-border text-foreground'
+                    }`}>
+                    全部
+                  </button>
+                  {users.map((user) => (
+                    <button
+                      key={user.id}
+                      type="button"
+                      onClick={() => setTaskFilter({...taskFilter, assignee: user.id})}
+                      className={`py-2 text-base rounded flex items-center justify-center leading-none ${
+                        taskFilter.assignee === user.id ? 'bg-primary text-primary-foreground' : 'bg-card border border-border text-foreground'
+                      }`}>
+                      {user.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 排序方式 */}
+              <div>
+                <div className="text-base text-foreground mb-2">排序方式</div>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setTaskFilter({...taskFilter, sortBy: 'created_at'})}
+                    className={`py-2 text-base rounded flex items-center justify-center leading-none ${
+                      taskFilter.sortBy === 'created_at' ? 'bg-primary text-primary-foreground' : 'bg-card border border-border text-foreground'
+                    }`}>
+                    创建时间
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTaskFilter({...taskFilter, sortBy: 'deadline'})}
+                    className={`py-2 text-base rounded flex items-center justify-center leading-none ${
+                      taskFilter.sortBy === 'deadline' ? 'bg-primary text-primary-foreground' : 'bg-card border border-border text-foreground'
+                    }`}>
+                    截止时间
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTaskFilter({...taskFilter, sortBy: 'priority'})}
+                    className={`py-2 text-base rounded flex items-center justify-center leading-none ${
+                      taskFilter.sortBy === 'priority' ? 'bg-primary text-primary-foreground' : 'bg-card border border-border text-foreground'
+                    }`}>
+                    优先级
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t border-border flex gap-3">
+              <button
+                type="button"
+                onClick={() => setShowTaskFilter(false)}
+                className="flex-1 py-3 bg-card border-2 border-border text-foreground text-xl rounded flex items-center justify-center leading-none">
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={handleApplyTaskFilter}
+                className="flex-1 py-3 bg-primary text-primary-foreground text-xl rounded flex items-center justify-center leading-none">
+                应用筛选
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 项目选择器弹窗 */}
+      {showProjectSelector && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-6">
+          <div className="bg-card rounded p-6 w-full max-w-md max-h-[80vh] flex flex-col">
+            <div className="text-xl text-foreground font-bold mb-4">选择{new Date().getMonth() + 1}月计划开标项目</div>
+            
+            {/* 项目列表 */}
+            <div className="flex-1 overflow-y-auto">
+              {availableProjects.length === 0 ? (
+                <div className="text-center py-8 text-base text-muted-foreground">
+                  {new Date().getMonth() + 1}月暂无计划开标项目
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {availableProjects.map(project => {
+                    const isSelected = selectedProjectIds.includes(project.id)
+                    return (
+                      <div
+                        key={project.id}
+                        onClick={() => toggleProjectSelection(project.id)}
+                        className={`p-4 rounded border-2 cursor-pointer transition-colors ${
+                          isSelected 
+                            ? 'border-primary bg-primary/10' 
+                            : 'border-border bg-background'
+                        }`}>
+                        <div className="flex items-start justify-between mb-2">
+                          <div className="flex-1">
+                            <div className="text-xl text-foreground font-bold mb-1">{project.name}</div>
+                            <div className="text-base text-muted-foreground mb-1">
+                              {project.construction_unit}
+                            </div>
+                            {project.expected_opening_date && (
+                              <div className="text-base text-primary">
+                                预计开标：{new Date(project.expected_opening_date).toLocaleDateString('zh-CN')}
+                              </div>
+                            )}
+                          </div>
+                          <div className={`text-3xl ${isSelected ? 'i-mdi-checkbox-marked text-primary' : 'i-mdi-checkbox-blank-outline text-muted-foreground'}`} />
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* 底部按钮 */}
+            <div className="mt-4 pt-4 border-t border-border flex gap-3">
+              <button
+                type="button"
+                onClick={() => setShowProjectSelector(false)}
+                className="flex-1 py-3 bg-card border-2 border-border text-foreground text-xl rounded flex items-center justify-center leading-none">
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveProjectSelection}
+                className="flex-1 py-3 bg-primary text-primary-foreground text-xl rounded flex items-center justify-center leading-none">
+                确定（已选 {selectedProjectIds.length}）
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default withRouteGuard(Home)
