@@ -2,13 +2,15 @@ import {useState, useCallback, useEffect, useMemo} from 'react'
 import Taro, {useDidShow} from '@tarojs/taro'
 import {Picker} from '@tarojs/components'
 import {useAuth} from '@/contexts/AuthContext'
-import {getCustomerById, updateCustomer} from '@/db/api'
+import {getCustomerById, updateCustomer, getAllProfiles} from '@/db/api'
 import type {CustomerType, CustomerClassification, ContactInfo} from '@/db/types'
 
 export default function EditCustomer() {
   const {profile} = useAuth()
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
+  const [allUsers, setAllUsers] = useState<any[]>([])
+  const [showPersonSelector, setShowPersonSelector] = useState(false)
 
   // 基本信息
   const [name, setName] = useState('')
@@ -18,6 +20,7 @@ export default function EditCustomer() {
   const [companyDevelopment, setCompanyDevelopment] = useState('')
   const [cooperationDirection, setCooperationDirection] = useState('')
   const [cooperationHistory, setCooperationHistory] = useState('')
+  const [responsiblePersonIds, setResponsiblePersonIds] = useState<string[]>([])
 
   // 联系人信息
   const [decisionContacts, setDecisionContacts] = useState<ContactInfo[]>([])
@@ -37,6 +40,11 @@ export default function EditCustomer() {
 
     try {
       setLoading(true)
+      
+      // 加载用户列表
+      const users = await getAllProfiles()
+      setAllUsers(Array.isArray(users) ? users : [])
+      
       const data = await getCustomerById(customerId)
       if (data) {
         setName(data.name)
@@ -49,6 +57,8 @@ export default function EditCustomer() {
         setDecisionContacts(data.decision_contacts || [])
         setInfluenceContacts(data.influence_contacts || [])
         setExecutionContacts(data.execution_contacts || [])
+        // 加载负责人列表
+        setResponsiblePersonIds(data.responsible_person_ids || (data.responsible_person_id ? [data.responsible_person_id] : []))
       }
     } catch (error) {
       console.error('加载客户信息失败:', error)
@@ -65,6 +75,25 @@ export default function EditCustomer() {
   useEffect(() => {
     loadData()
   }, [loadData])
+
+  // 切换负责人选择
+  const togglePersonSelection = (userId: string) => {
+    if (responsiblePersonIds.includes(userId)) {
+      setResponsiblePersonIds(responsiblePersonIds.filter((id) => id !== userId))
+    } else {
+      setResponsiblePersonIds([...responsiblePersonIds, userId])
+    }
+  }
+
+  // 清空负责人选择
+  const clearPersonSelection = () => {
+    setResponsiblePersonIds([])
+  }
+
+  // 移除单个负责人标签
+  const removePersonTag = (userId: string) => {
+    setResponsiblePersonIds(responsiblePersonIds.filter((id) => id !== userId))
+  }
 
   // 添加联系人
   const addContact = (level: 'decision' | 'influence' | 'execution') => {
@@ -132,7 +161,8 @@ export default function EditCustomer() {
         supplier_info: supplierInfo || null,
         company_development: companyDevelopment || null,
         cooperation_direction: cooperationDirection || null,
-        cooperation_history: cooperationHistory || null
+        cooperation_history: cooperationHistory || null,
+        responsible_person_ids: responsiblePersonIds.length > 0 ? responsiblePersonIds : [profile.id]
       })
 
       Taro.showToast({title: '更新成功', icon: 'success'})
@@ -362,6 +392,57 @@ export default function EditCustomer() {
           </Picker>
         </div>
 
+        {/* 客户负责人多选 */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-xl text-foreground">客户负责人</div>
+            {responsiblePersonIds.length > 0 && (
+              <button
+                type="button"
+                onClick={clearPersonSelection}
+                className={`text-sm text-primary flex items-center gap-1 leading-none transition-opacity ${
+                  responsiblePersonIds.length > 0 ? 'opacity-100' : 'opacity-0 pointer-events-none'
+                }`}>
+                <div className="i-mdi-close-circle text-base" />
+                <span>清空</span>
+              </button>
+            )}
+          </div>
+
+          {/* 多选按钮 */}
+          <button
+            type="button"
+            onClick={() => setShowPersonSelector(true)}
+            className="w-full border-2 border-input rounded px-4 py-3 bg-card flex items-center justify-between">
+            <span className="text-xl text-foreground">
+              {responsiblePersonIds.length === 0 ? '请选择负责人' : `已选 ${responsiblePersonIds.length} 人`}
+            </span>
+            <div className="i-mdi-chevron-down text-2xl text-muted-foreground" />
+          </button>
+
+          {/* 已选标签 */}
+          <div 
+            className={`flex flex-wrap gap-2 mt-3 transition-opacity ${
+              responsiblePersonIds.length > 0 ? 'opacity-100' : 'opacity-0 h-0 overflow-hidden'
+            }`}>
+            {responsiblePersonIds.map((userId) => {
+              const user = allUsers.find((u) => u.id === userId)
+              return (
+                <div
+                  key={userId}
+                  className="px-3 py-2 bg-primary/10 text-primary rounded flex items-center gap-2 leading-none">
+                  <span className="text-base">{user?.name || user?.phone || '未知用户'}</span>
+                  <button
+                    type="button"
+                    onClick={() => removePersonTag(userId)}
+                    className="i-mdi-close text-lg flex items-center justify-center leading-none"
+                  />
+                </div>
+              )
+            })}
+          </div>
+        </div>
+
         {/* 决策层联系人 */}
         {renderContactSection('决策层联系人', 'decision', decisionContacts)}
 
@@ -471,6 +552,66 @@ export default function EditCustomer() {
             className="flex-1 py-4 bg-primary text-primary-foreground text-xl rounded flex items-center justify-center leading-none">
             {submitting ? '提交中...' : '保存'}
           </button>
+        </div>
+      </div>
+
+      {/* 负责人多选弹窗 */}
+      <div 
+        className={`fixed inset-0 bg-black/50 flex items-end justify-center z-50 transition-opacity ${
+          showPersonSelector ? 'opacity-100' : 'opacity-0 pointer-events-none'
+        }`}>
+        <div 
+          className={`bg-card rounded-t-2xl w-full max-h-[70vh] overflow-y-auto transition-transform ${
+            showPersonSelector ? 'translate-y-0' : 'translate-y-full'
+          }`}>
+          {/* 头部 */}
+          <div className="sticky top-0 bg-card border-b border-border px-6 py-4 flex items-center justify-between">
+            <div className="text-xl text-foreground font-bold">选择负责人</div>
+            <button
+              type="button"
+              onClick={() => setShowPersonSelector(false)}
+              className="i-mdi-close text-2xl text-muted-foreground"
+            />
+          </div>
+
+          {/* 选项列表 */}
+          <div className="px-6 py-4">
+            {allUsers.map((user) => (
+              <button
+                key={user.id}
+                type="button"
+                onClick={() => togglePersonSelection(user.id)}
+                className="w-full flex items-center justify-between py-3 border-b border-border">
+                <span className="text-xl text-foreground">{user.name || user.phone || '未命名'}</span>
+                <div
+                  className={`w-6 h-6 rounded border-2 flex items-center justify-center ${
+                    responsiblePersonIds.includes(user.id)
+                      ? 'bg-primary border-primary'
+                      : 'border-input'
+                  }`}>
+                  {responsiblePersonIds.includes(user.id) && (
+                    <div className="i-mdi-check text-lg text-primary-foreground" />
+                  )}
+                </div>
+              </button>
+            ))}
+          </div>
+
+          {/* 底部操作 */}
+          <div className="sticky bottom-0 bg-card border-t border-border px-6 py-4 flex gap-3">
+            <button
+              type="button"
+              onClick={clearPersonSelection}
+              className="flex-1 py-3 bg-card border-2 border-border text-foreground text-xl rounded flex items-center justify-center leading-none">
+              清空选择
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowPersonSelector(false)}
+              className="flex-1 py-3 bg-primary text-primary-foreground text-xl rounded flex items-center justify-center leading-none">
+              确定（已选{responsiblePersonIds.length}人）
+            </button>
+          </div>
         </div>
       </div>
     </div>
