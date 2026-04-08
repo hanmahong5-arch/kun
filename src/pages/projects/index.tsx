@@ -137,24 +137,27 @@ function Projects() {
     return orderA - orderB
   })
 
-  // 统计数据
+  // 统计数据（排除"已中标"和"放弃跟踪"状态的项目）
   const stats = useMemo(() => {
-    const total = projects.length
-    const aLockCount = projects.filter((p) => p.classification === 'a_lock').length
-    const aCompeteCount = projects.filter((p) => p.classification === 'a_compete').length
+    // 过滤出未中标的项目（排除"已中标"和"放弃跟踪"）
+    const activeProjects = projects.filter((p) => p.stage !== '已中标' && p.stage !== '放弃跟踪')
     
-    // 计算合计合同额（所有项目的投资规模总和）
-    const totalAmount = projects
+    const total = activeProjects.length
+    const aLockCount = activeProjects.filter((p) => p.classification === 'a_lock').length
+    const aCompeteCount = activeProjects.filter((p) => p.classification === 'a_compete').length
+    
+    // 计算合计合同额（未中标项目的投资规模总和）
+    const totalAmount = activeProjects
       .filter((p) => p.investment_amount)
       .reduce((sum, p) => sum + (p.investment_amount || 0), 0)
     
-    // 计算A锁项目合计金额（所有A锁项目的投资规模总和）
-    const aLockAmount = projects
+    // 计算A锁项目合计金额（未中标的A锁项目的投资规模总和）
+    const aLockAmount = activeProjects
       .filter((p) => p.classification === 'a_lock' && p.investment_amount)
       .reduce((sum, p) => sum + (p.investment_amount || 0), 0)
     
-    // 计算A争项目合计金额（所有A争项目的投资规模总和）
-    const aCompeteAmount = projects
+    // 计算A争项目合计金额（未中标的A争项目的投资规模总和）
+    const aCompeteAmount = activeProjects
       .filter((p) => p.classification === 'a_compete' && p.investment_amount)
       .reduce((sum, p) => sum + (p.investment_amount || 0), 0)
     
