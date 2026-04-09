@@ -161,8 +161,8 @@ export default function Login() {
     <div className="min-h-screen bg-background flex flex-col">
       {/* 头部 */}
       <div className="bg-gradient-primary px-6 py-12 flex flex-col items-center">
-        <div className="text-4xl text-primary-foreground font-bold mb-2">施工企业市场经营管理</div>
-        <div className="text-xl text-primary-foreground/80">Construction Market Management</div>
+        <div className="text-4xl text-primary-foreground font-bold mb-2">智通经纬</div>
+        <div className="text-xl text-primary-foreground/80">施工企业数字化经营平台</div>
       </div>
 
       {/* 登录表单 */}

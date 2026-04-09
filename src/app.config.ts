@@ -101,7 +101,7 @@ export default defineAppConfig({
   window: {
     backgroundTextStyle: 'light',
     navigationBarBackgroundColor: '#1D2B36',
-    navigationBarTitleText: '施工企业市场经营管理',
+    navigationBarTitleText: '智通经纬',
     navigationBarTextStyle: 'white'
   }
 })

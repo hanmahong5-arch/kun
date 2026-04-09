@@ -126,7 +126,7 @@ function SystemSettingsPage() {
       <div className="px-6 mt-6">
         <div className="bg-muted/30 rounded p-4">
           <div className="text-base text-muted-foreground text-center">
-            施工企业市场经营管理系统 v1.0.0
+            智通经纬 v1.0.0
           </div>
           <div className="text-sm text-muted-foreground text-center mt-2">
             © 2026 All Rights Reserved
