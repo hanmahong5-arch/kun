@@ -10,7 +10,12 @@ function BidsPage() {
   const {profile} = useAuth()
   const [bids, setBids] = useState<Bid[]>([])
   const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState<'all' | 'pending' | 'won' | 'lost'>('all')
+
+  // Read URL params for pre-filtering from dashboard
+  const routeParams = Taro.getCurrentInstance().router?.params || {}
+  const initFilter = (routeParams.filter as 'all' | 'pending' | 'won' | 'lost') || 'all'
+
+  const [filter, setFilter] = useState<'all' | 'pending' | 'won' | 'lost'>(initFilter)
 
   const canManage =
     isAdmin(profile) ||

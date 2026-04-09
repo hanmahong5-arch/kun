@@ -11,8 +11,14 @@ function Customers() {
   const {profile} = useAuth()
   const [customers, setCustomers] = useState<Customer[]>([])
   const [loading, setLoading] = useState(true)
-  const [selectedTypes, setSelectedTypes] = useState<CustomerType[]>([]) // 改为数组支持多选
-  const [classFilter, setClassFilter] = useState<CustomerClassification | 'all'>('all')
+
+  // Read URL params for pre-filtering from dashboard
+  const routeParams = Taro.getCurrentInstance().router?.params || {}
+  const initClassFilter = (routeParams.classification as CustomerClassification) || 'all'
+  const initType = routeParams.type || ''
+
+  const [selectedTypes, setSelectedTypes] = useState<CustomerType[]>(initType ? [initType as CustomerType] : [])
+  const [classFilter, setClassFilter] = useState<CustomerClassification | 'all'>(initClassFilter)
   const [searchKeyword, setSearchKeyword] = useState('')
   const [lastFollowUpDates, setLastFollowUpDates] = useState<Record<string, string>>({})
   const [showTypeSelector, setShowTypeSelector] = useState(false) // 控制多选弹窗

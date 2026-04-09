@@ -13,7 +13,14 @@ function Projects() {
   const [projects, setProjects] = useState<any[]>([])
   const [allUsers, setAllUsers] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [classFilter, setClassFilter] = useState<ProjectClassification | 'all'>('all')
+
+  // Read URL params for pre-filtering from dashboard
+  const routeParams = Taro.getCurrentInstance().router?.params || {}
+  const initClass = (routeParams.classification as ProjectClassification) || 'all'
+  const initStage = routeParams.stage || ''
+
+  const [classFilter, setClassFilter] = useState<ProjectClassification | 'all'>(initClass)
+  const [stageFilter, setStageFilter] = useState<string>(initStage)
   const [personFilter, setPersonFilter] = useState<string>('all')
   const [searchKeyword, setSearchKeyword] = useState('')
   const [batchMode, setBatchMode] = useState(false)
@@ -117,8 +124,13 @@ function Projects() {
   let filteredProjects = projects.filter((project) => {
     // 默认隐藏归档项目，除非开启显示归档项目开关
     if (!showArchived && project.is_archived) return false
-    // 隐藏"已中标"和"放弃跟踪"状态的项目
-    if (project.stage === '已中标' || project.stage === '放弃跟踪') return false
+    // When a specific stage filter is set (from dashboard), show only that stage
+    if (stageFilter) {
+      if (project.stage !== stageFilter) return false
+    } else {
+      // Default: hide 已中标 and 放弃跟踪
+      if (project.stage === '已中标' || project.stage === '放弃跟踪') return false
+    }
     if (classFilter !== 'all' && project.classification !== classFilter) return false
     if (personFilter !== 'all' && project.responsible_person_id !== personFilter) return false
     if (searchKeyword && !project.name.includes(searchKeyword)) return false

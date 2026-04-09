@@ -11,6 +11,8 @@ interface DistributionItem {
   label: string
   count: number
   amount?: number
+  // Navigation params when this row is clicked
+  navUrl?: string
 }
 
 interface CategoryDistribution {
@@ -30,7 +32,6 @@ function LeaderDashboard() {
 
   const hasAccess = isLeaderOrAdmin(profile)
 
-  // Load KPI + alerts + distributions all at once
   const loadData = useCallback(async () => {
     try {
       setLoading(true)
@@ -40,8 +41,6 @@ function LeaderDashboard() {
       ])
       setKpiData(kpiResult)
       setAlerts(alertsResult)
-
-      // Load all distributions in parallel
       await loadDistributions()
     } catch (error) {
       console.error('加载数据失败:', error)
@@ -71,16 +70,17 @@ function LeaderDashboard() {
       })
 
       // Project: classification distribution
-      const classLabels: Record<string, string> = {
+      const classKeys: Record<string, string> = {
         a_lock: 'A跟', a_compete: 'A争', b_class: 'B类', c_class: 'C类', d_class: 'D类'
       }
-      const classMap = new Map<string, {count: number; amount: number}>()
+      const classMap = new Map<string, {count: number; amount: number; key: string}>()
       let wonCount = 0
       let trackingCount = 0
       projects.forEach((p) => {
-        const label = classLabels[p.classification] || p.classification || '未分类'
-        const prev = classMap.get(label) || {count: 0, amount: 0}
-        classMap.set(label, {count: prev.count + 1, amount: prev.amount + (p.investment_amount || 0)})
+        const key = p.classification || 'unknown'
+        const label = classKeys[key] || key
+        const prev = classMap.get(label) || {count: 0, amount: 0, key}
+        classMap.set(label, {count: prev.count + 1, amount: prev.amount + (p.investment_amount || 0), key})
         if (p.stage === '已中标') wonCount++
         else trackingCount++
       })
@@ -96,22 +96,36 @@ function LeaderDashboard() {
 
       setDistributions({
         financial: {
-          items: Array.from(typeMap.entries()).map(([label, v]) => ({label, count: v.count, amount: v.amount})),
+          items: Array.from(typeMap.entries()).map(([label, v]) => ({
+            label,
+            count: v.count,
+            amount: v.amount,
+            navUrl: '/pages/projects/index?stage=已中标'
+          })),
           total: wonProjects.length
         },
         project: {
           items: [
-            {label: '已中标', count: wonCount},
-            {label: '在跟踪', count: trackingCount},
-            ...Array.from(classMap.entries()).map(([label, v]) => ({label, count: v.count, amount: v.amount}))
+            {label: '已中标', count: wonCount, navUrl: '/pages/projects/index?stage=已中标'},
+            {label: '在跟踪', count: trackingCount, navUrl: '/pages/projects/index'},
+            ...Array.from(classMap.entries()).map(([label, v]) => ({
+              label,
+              count: v.count,
+              amount: v.amount,
+              navUrl: `/pages/projects/index?classification=${v.key}`
+            }))
           ],
           total: projects.length
         },
         customer: {
           items: [
-            {label: '新客户', count: newCount},
-            {label: '老客户', count: oldCount},
-            ...Array.from(custTypeMap.entries()).map(([label, count]) => ({label, count}))
+            {label: '新客户', count: newCount, navUrl: '/pages/customers/index?classification=新客户'},
+            {label: '老客户', count: oldCount, navUrl: '/pages/customers/index?classification=老客户'},
+            ...Array.from(custTypeMap.entries()).map(([label, count]) => ({
+              label,
+              count,
+              navUrl: `/pages/customers/index?type=${encodeURIComponent(label)}`
+            }))
           ],
           total: customers.length
         }
@@ -143,7 +157,6 @@ function LeaderDashboard() {
     return 'text-destructive'
   }
 
-  // Group KPI by category
   const groupedKPI = kpiData.reduce(
     (acc, kpi) => {
       if (!acc[kpi.category]) acc[kpi.category] = []
@@ -164,6 +177,21 @@ function LeaderDashboard() {
     project: 'i-mdi-briefcase',
     customer: 'i-mdi-account-group'
   }
+
+  // "View all" link for each category
+  const categoryListUrl: Record<string, string> = {
+    financial: '/pages/bids/index?filter=won',
+    project: '/pages/projects/index',
+    customer: '/pages/customers/index'
+  }
+
+  // Quick navigation entries
+  const quickNav = [
+    {icon: 'i-mdi-chart-timeline-variant', label: '项目分析', url: '/pages/projects/analytics/index'},
+    {icon: 'i-mdi-account-search', label: '客户分析', url: '/pages/customers/analytics/index'},
+    {icon: 'i-mdi-gavel', label: '投标记录', url: '/pages/bids/index'},
+    {icon: 'i-mdi-book-open-variant', label: '知识库', url: '/pages/documents/index'},
+  ]
 
   if (!profile || !hasAccess) {
     return (
@@ -215,6 +243,21 @@ function LeaderDashboard() {
         </div>
       )}
 
+      {/* Quick navigation */}
+      <div className="px-6 mt-4">
+        <div className="grid grid-cols-4 gap-3">
+          {quickNav.map((item) => (
+            <div
+              key={item.label}
+              onClick={() => Taro.navigateTo({url: item.url})}
+              className="bg-card rounded p-3 border border-border flex flex-col items-center gap-2 active:bg-muted/50">
+              <div className={`${item.icon} text-2xl text-primary`} />
+              <div className="text-sm text-foreground text-center">{item.label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* KPI sections */}
       {loading ? (
         <div className="text-center py-12">
@@ -227,10 +270,19 @@ function LeaderDashboard() {
 
             return (
               <div key={category}>
-                {/* Category header */}
-                <div className="text-xl text-foreground font-bold mb-3 flex items-center gap-2">
-                  <div className={`${categoryIcons[category] || 'i-mdi-chart-line'} text-2xl text-primary`} />
-                  <span>{categoryNames[category] || category}</span>
+                {/* Category header with "view all" link */}
+                <div className="flex items-center justify-between mb-3">
+                  <div className="text-xl text-foreground font-bold flex items-center gap-2">
+                    <div className={`${categoryIcons[category] || 'i-mdi-chart-line'} text-2xl text-primary`} />
+                    <span>{categoryNames[category] || category}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => Taro.navigateTo({url: categoryListUrl[category]})}
+                    className="text-sm text-primary flex items-center gap-1">
+                    <span>查看全部</span>
+                    <div className="i-mdi-chevron-right text-base" />
+                  </button>
                 </div>
 
                 {/* KPI cards */}
@@ -250,7 +302,7 @@ function LeaderDashboard() {
                             url: `/pages/leader/kpi-detail/index?id=${kpi.id}&name=${encodeURIComponent(kpi.name)}`
                           })
                         }
-                        className="bg-gradient-subtle rounded p-4 border border-border">
+                        className="bg-gradient-subtle rounded p-4 border border-border active:bg-muted/50">
                         <div className="text-base text-muted-foreground mb-2">{kpi.name}</div>
 
                         <div className="flex items-baseline gap-2 mb-2">
@@ -291,7 +343,7 @@ function LeaderDashboard() {
                   })}
                 </div>
 
-                {/* Inline distribution — directly below KPI cards */}
+                {/* Inline distribution — each row clickable to filtered list */}
                 {dist && dist.items.length > 0 && (
                   <div className="mt-3 bg-card rounded p-4 border border-border">
                     <div className="flex items-center justify-between mb-3">
@@ -307,9 +359,17 @@ function LeaderDashboard() {
                       {dist.items.map((item) => {
                         const pct = dist.total > 0 ? Math.round((item.count / dist.total) * 100) : 0
                         return (
-                          <div key={item.label}>
+                          <div
+                            key={item.label}
+                            onClick={() => {
+                              if (item.navUrl) Taro.navigateTo({url: item.navUrl})
+                            }}
+                            className={item.navUrl ? 'active:bg-muted/50 rounded -mx-1 px-1 py-0.5' : ''}>
                             <div className="flex items-center justify-between text-sm mb-1">
-                              <span className="text-foreground">{item.label}</span>
+                              <span className="text-foreground flex items-center gap-1">
+                                {item.label}
+                                {item.navUrl && <div className="i-mdi-chevron-right text-xs text-muted-foreground" />}
+                              </span>
                               <span className="text-muted-foreground">
                                 {item.count}{item.amount !== undefined ? ` / ${item.amount}万` : ''} ({pct}%)
                               </span>
