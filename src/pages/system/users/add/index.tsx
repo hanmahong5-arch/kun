@@ -170,27 +170,39 @@ function AddUser() {
 
       // ========== 处理返回结果 ==========
       
-      // 如果使用随机密码，保存生成的密码并显示
+      // Show confirmation dialog with password info, then navigate
+      const actualPassword = passwordType === 'random' && data.password
+        ? data.password
+        : passwordType === 'custom' ? customPassword : '123456'
+
       if (passwordType === 'random' && data.password) {
         setGeneratedPassword(data.password)
-        Taro.showModal({
-          title: '用户创建成功',
-          content: `随机密码：${data.password}\n\n请将此密码告知用户，用户可登录后修改密码。`,
-          showCancel: false,
-          confirmText: '我已记录',
-          success: () => {
-            setTimeout(() => {
-              Taro.navigateBack()
-            }, 500)
-          }
-        })
-      } else {
-        // 默认密码或自定义密码
-        Taro.showToast({title: '添加成功，用户可立即登录', icon: 'success'})
-        setTimeout(() => {
-          Taro.navigateBack()
-        }, 1500)
       }
+
+      const passwordHint = passwordType === 'random'
+        ? `随机密码：${actualPassword}\n\n请务必记录并告知用户。`
+        : `初始密码：${actualPassword}\n\n请告知用户登录后修改密码。`
+
+      Taro.showModal({
+        title: '用户创建成功',
+        content: `${name} (${phone}) 已创建。\n\n${passwordHint}`,
+        showCancel: true,
+        cancelText: '继续添加',
+        confirmText: '返回列表',
+        success: (res) => {
+          if (res.confirm) {
+            Taro.navigateBack()
+          } else {
+            // Reset form for next user
+            setPhone('')
+            setName('')
+            setCustomPassword('')
+            setGeneratedPassword('')
+            setPasswordType('default')
+            setSelectedTeamIds([])
+          }
+        }
+      })
     } catch (error: unknown) {
       console.error('添加用户失败:', error)
       const err = error as Error
