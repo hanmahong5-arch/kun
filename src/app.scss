@@ -73,20 +73,52 @@
   .bg-gradient-primary {
     background: var(--gradient-primary);
   }
-  
+
   .bg-gradient-subtle {
     background: var(--gradient-subtle);
   }
-  
+
   .bg-gradient-card {
     background: var(--gradient-card);
   }
-  
+
   .shadow-elegant {
     box-shadow: var(--shadow-elegant);
   }
-  
+
   .shadow-card {
     box-shadow: var(--shadow-card);
+  }
+}
+
+/* Desktop TabBar responsive scaling */
+@media (min-width: 768px) {
+  .taro-tabbar__tabbar {
+    max-width: 600px;
+    margin: 0 auto;
+    height: 64px !important;
+    border-top: 1px solid hsl(var(--border));
+    background: hsl(var(--card)) !important;
+    box-shadow: 0 -2px 12px rgba(0,0,0,0.06);
+    border-radius: 16px 16px 0 0;
+  }
+
+  .taro-tabbar__tabbar-item {
+    padding: 6px 0 !important;
+  }
+
+  .taro-tabbar__tabbar-icon {
+    width: 28px !important;
+    height: 28px !important;
+  }
+
+  .taro-tabbar__tabbar-title {
+    font-size: 14px !important;
+    margin-top: 4px !important;
+  }
+
+  /* Compensate page bottom padding for taller tabbar */
+  .taro-tabbar__container .taro-tabbar__panel {
+    padding-bottom: 64px !important;
   }
 }
