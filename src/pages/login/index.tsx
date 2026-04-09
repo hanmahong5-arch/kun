@@ -60,35 +60,9 @@ export default function Login() {
     }
   }
 
-  // 发送验证码
+  // 发送验证码（短信服务尚未对接）
   const handleSendCode = async () => {
-    if (!phone || phone.length !== 11) {
-      Taro.showToast({title: '请输入正确的手机号', icon: 'none'})
-      return
-    }
-    if (countdown > 0) {
-      return
-    }
-
-    try {
-      // 测试环境：直接显示固定验证码
-      Taro.showToast({title: '验证码：123456（测试）', icon: 'none', duration: 3000})
-      
-      // 开始倒计时
-      setCountdown(60)
-      const timer = setInterval(() => {
-        setCountdown((prev) => {
-          if (prev <= 1) {
-            clearInterval(timer)
-            return 0
-          }
-          return prev - 1
-        })
-      }, 1000)
-    } catch (error) {
-      console.error('发送验证码失败:', error)
-      Taro.showToast({title: '发送失败，请重试', icon: 'none'})
-    }
+    Taro.showToast({title: '短信验证码服务尚未开通，请使用密码登录', icon: 'none', duration: 3000})
   }
 
   // 手机号+验证码登录
@@ -108,15 +82,12 @@ export default function Login() {
 
     setLoading(true)
     try {
-      // 测试环境：固定验证码123456
-      if (code !== '123456') {
-        Taro.showToast({title: '验证码错误', icon: 'none'})
-        setLoading(false)
-        return
-      }
+      Taro.showToast({title: '短信验证码服务尚未开通，请使用密码登录', icon: 'none', duration: 3000})
+      setLoading(false)
+      return
 
-      // 验证码正确，使用默认密码登录
-      const result = await signInWithPhone(phone, '123456')
+      // TODO: 对接短信服务后启用
+      const result = await signInWithPhone(phone, password)
       
       if (result.error) {
         let displayMsg = '登录失败'
@@ -184,13 +155,6 @@ export default function Login() {
         Taro.switchTab({url: '/pages/home/index'})
       }
     }, 500)
-  }
-
-  // 快速填充测试账号
-  const fillTestAccount = (testPhone: string) => {
-    setPhone(testPhone)
-    setPassword('123456')
-    setLoginType('password')
   }
 
   return (
@@ -393,32 +357,9 @@ export default function Login() {
           </div>
         </div>
 
-        {/* 测试账号 */}
-        <div className="mt-8">
-          <div className="text-base text-muted-foreground mb-3">测试账号（点击快速填充）</div>
-          <div className="flex flex-col gap-3">
-            <div
-              onClick={() => fillTestAccount('15232101989')}
-              className="bg-gradient-to-r from-blue-500 to-blue-600 rounded-lg p-4">
-              <div className="text-xl text-white font-bold mb-1">系统管理员</div>
-              <div className="text-base text-white/90">手机号：15232101989</div>
-              <div className="text-base text-white/90">密码：123456</div>
-            </div>
-            <div
-              onClick={() => fillTestAccount('17685587922')}
-              className="bg-gradient-to-r from-blue-500 to-blue-600 rounded-lg p-4">
-              <div className="text-xl text-white font-bold mb-1">系统管理员</div>
-              <div className="text-base text-white/90">手机号：17685587922</div>
-              <div className="text-base text-white/90">密码：123456</div>
-            </div>
-            <div
-              onClick={() => fillTestAccount('13869824089')}
-              className="bg-card border border-border rounded-lg p-4">
-              <div className="text-xl text-foreground font-bold mb-1">公司领导</div>
-              <div className="text-base text-muted-foreground">手机号：13869824089</div>
-              <div className="text-base text-muted-foreground">密码：123456</div>
-            </div>
-          </div>
+        {/* 版本信息 */}
+        <div className="mt-8 text-center">
+          <div className="text-sm text-muted-foreground">v1.0.0</div>
         </div>
       </div>
     </div>

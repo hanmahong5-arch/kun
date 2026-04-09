@@ -244,10 +244,10 @@ export default function TeamGoals({isAdmin, userId}: TeamGoalsProps) {
 
               <div className="flex items-center justify-between text-sm">
                 <div className="text-muted-foreground">
-                  已完成: <span className="text-foreground font-bold">{contractCompleted}</span> 万元
+                  已完成: <span className="text-foreground font-bold">{(contractCompleted / 10000).toFixed(2)}</span> 亿元
                 </div>
                 <div className="text-muted-foreground">
-                  目标: <span className="text-foreground font-bold">{contractTarget}</span> 万元
+                  目标: <span className="text-foreground font-bold">{(contractTarget / 10000).toFixed(2)}</span> 亿元
                 </div>
               </div>
             </div>

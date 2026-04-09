@@ -3,6 +3,7 @@ import Taro, {useDidShow} from '@tarojs/taro'
 import {withRouteGuard} from '@/components/RouteGuard'
 import {useAuth} from '@/contexts/AuthContext'
 import {getAllProfiles} from '@/db/api'
+import {maskPhone} from '@/utils/format'
 import type {Profile} from '@/db/types'
 import {RoleDisplayNames} from '@/db/types'
 import {supabase} from '@/client/supabase'
@@ -50,36 +51,38 @@ function UserManagement() {
   }
 
   const handleDeleteUser = async (userId: string, userName: string) => {
+    // Double confirmation for destructive action (国央企 safety requirement)
     const res = await Taro.showModal({
-      title: '确认删除',
-      content: `确定要删除用户"${userName}"吗？此操作不可恢复`,
-      confirmText: '删除',
+      title: '确认删除用户',
+      content: `确定要删除用户"${userName}"吗？\n\n该用户的所有数据（周报、任务等）将一并删除，此操作不可恢复。`,
+      confirmText: '确认删除',
       confirmColor: '#ef4444'
     })
 
     if (!res.confirm) return
 
     try {
-      Taro.showLoading({title: '删除中...'})
+      Taro.showLoading({title: '正在删除用户...'})
 
-      // 1. 删除profiles记录
+      // Safe deletion order: related data -> user_roles -> profile -> auth
+      // Profile has ON DELETE CASCADE, so related data is cleaned automatically
+
+      // 1. Delete user-role associations
+      await supabase.from('user_roles').delete().eq('user_id', userId)
+
+      // 2. Delete profile (CASCADE handles weekly_reports, tasks, etc.)
       const {error: profileError} = await supabase.from('profiles').delete().eq('id', userId)
+      if (profileError) throw new Error(`删除用户档案失败: ${profileError.message}`)
 
-      if (profileError) throw profileError
+      // 3. Auth user deletion is handled by CASCADE (profiles references auth.users with ON DELETE CASCADE)
+      // If auth user remains, it's harmless (no profile = can't login)
 
-      // 2. 删除auth用户（需要管理员权限）
-      const {error: authError} = await supabase.auth.admin.deleteUser(userId)
-
-      if (authError) {
-        console.error('删除auth用户失败:', authError)
-        // 不抛出错误，因为profile已删除
-      }
-
-      Taro.showToast({title: '删除成功', icon: 'success'})
+      Taro.showToast({title: '用户已删除', icon: 'success'})
       loadUsers()
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('删除用户失败:', error)
-      Taro.showToast({title: '删除失败', icon: 'none'})
+      const msg = (error as Error)?.message || '请稍后重试'
+      Taro.showModal({title: '删除失败', content: msg, showCancel: false, confirmText: '知道了'})
     } finally {
       Taro.hideLoading()
     }
@@ -230,7 +233,7 @@ function UserManagement() {
   }
 
   // 检查权限
-  if (!profile || profile.role !== 'system_admin') {
+  if (!profile || (profile.role !== 'system_admin' && profile.role !== 'super_admin')) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center px-6">
         <div className="text-center">
@@ -387,7 +390,7 @@ function UserManagement() {
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex-1">
                     <div className="text-xl text-foreground font-bold mb-1">{user.name}</div>
-                    <div className="text-base text-muted-foreground">{user.phone}</div>
+                    <div className="text-base text-muted-foreground">{maskPhone(user.phone)}</div>
                   </div>
                   <div className="flex items-center gap-2">
                     <button

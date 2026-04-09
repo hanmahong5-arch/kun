@@ -114,21 +114,6 @@ function Profile() {
           url: '/pages/system/roles/index' as string
         },
         {
-          icon: 'i-mdi-briefcase-account',
-          title: '职级配置',
-          url: '/pages/system/job-level-mapping/index' as string
-        },
-        {
-          icon: 'i-mdi-account-group',
-          title: '账号管理',
-          url: '/pages/system/accounts/index' as string
-        },
-        {
-          icon: 'i-mdi-file-document',
-          title: '系统日志',
-          url: '/pages/system/logs/index' as string
-        },
-        {
           icon: 'i-mdi-cog',
           title: '系统设置',
           url: '/pages/system/settings/index' as string

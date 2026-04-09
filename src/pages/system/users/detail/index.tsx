@@ -3,6 +3,7 @@ import Taro, {useDidShow} from '@tarojs/taro'
 import {withRouteGuard} from '@/components/RouteGuard'
 import {useAuth} from '@/contexts/AuthContext'
 import {getProfile} from '@/db/api'
+import {maskPhone} from '@/utils/format'
 import type {Profile} from '@/db/types'
 import {RoleDisplayNames} from '@/db/types'
 
@@ -103,7 +104,7 @@ function UserDetail() {
               <div className="i-mdi-phone text-2xl text-primary" />
               <div className="flex-1">
                 <div className="text-base text-muted-foreground mb-1">手机号</div>
-                <div className="text-xl text-foreground">{user.phone}</div>
+                <div className="text-xl text-foreground">{maskPhone(user.phone)}</div>
               </div>
             </div>
 

@@ -3,6 +3,7 @@ import Taro from '@tarojs/taro'
 import {useAuth} from '@/contexts/AuthContext'
 import {supabase} from '@/client/supabase'
 import {deleteProject} from '@/db/api'
+import {isLeader} from '@/db/permissions-utils'
 
 export default function ProjectDetail() {
   const {profile} = useAuth()
@@ -212,7 +213,8 @@ export default function ProjectDetail() {
         )}
       </div>
 
-      {/* 操作按钮 */}
+      {/* 操作按钮 - 公司领导仅查看，不显示编辑/删除 */}
+      {!isLeader(profile) && (
       <div className="px-6 mt-6 pb-6 flex flex-col gap-3">
         <div className="flex gap-3">
           <button
@@ -247,6 +249,7 @@ export default function ProjectDetail() {
           </button>
         )}
       </div>
+      )}
     </div>
   )
 }

@@ -204,8 +204,8 @@ function AddUser() {
     }
   }
 
-  // 检查权限
-  if (!profile || profile.role !== 'system_admin') {
+  // 检查权限（超级管理员和系统管理员均可访问）
+  if (!profile || (profile.role !== 'system_admin' && profile.role !== 'super_admin')) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center px-6">
         <div className="text-center">

@@ -48,6 +48,7 @@ const fieldMapping: Record<string, keyof ExportProject> = {
   '负责人': 'responsible_person',
   '工程概况': 'project_overview',
   '项目简介': 'project_introduction',
+  '历史跟踪进展': 'tracking_records',
   '创建时间': 'created_at',
   '更新时间': 'updated_at',
   '项目地址': 'project_address',
@@ -58,15 +59,22 @@ const fieldMapping: Record<string, keyof ExportProject> = {
 // 格式化字段值
 const formatFieldValue = (field: string, value: any): string => {
   if (value === null || value === undefined) return ''
-  
+
+  if (field === '历史跟踪进展' && Array.isArray(value)) {
+    if (value.length === 0) return ''
+    return value
+      .map((r) => `[${new Date(r.created_at).toLocaleDateString('zh-CN')} ${r.creator_name}] ${r.content}`)
+      .join('\n')
+  }
+
   if (field === '投资规模' && typeof value === 'number') {
     return `${value}万元`
   }
-  
+
   if ((field === '创建时间' || field === '更新时间') && value) {
     return new Date(value).toLocaleDateString('zh-CN')
   }
-  
+
   return String(value)
 }
 
@@ -101,23 +109,25 @@ export const exportToExcel = (projects: ExportProject[], selectedFields?: string
   const ws1 = XLSX.utils.json_to_sheet(projectListData)
   XLSX.utils.book_append_sheet(wb, ws1, '项目列表')
 
-  // 工作表2: 跟踪记录
-  const trackingData: any[] = []
-  projects.forEach((p) => {
-    if (p.tracking_records && p.tracking_records.length > 0) {
-      p.tracking_records.forEach((record) => {
-        trackingData.push({
-          项目名称: p.name,
-          跟踪内容: record.content,
-          记录人: record.creator_name,
-          记录时间: new Date(record.created_at).toLocaleDateString('zh-CN')
+  // 工作表2: 跟踪记录（仅当选中"历史跟踪进展"字段时导出）
+  if (fields.includes('历史跟踪进展')) {
+    const trackingData: any[] = []
+    projects.forEach((p) => {
+      if (p.tracking_records && p.tracking_records.length > 0) {
+        p.tracking_records.forEach((record) => {
+          trackingData.push({
+            项目名称: p.name,
+            跟踪内容: record.content,
+            记录人: record.creator_name,
+            记录时间: new Date(record.created_at).toLocaleDateString('zh-CN')
+          })
         })
-      })
+      }
+    })
+    if (trackingData.length > 0) {
+      const ws2 = XLSX.utils.json_to_sheet(trackingData)
+      XLSX.utils.book_append_sheet(wb, ws2, '跟踪记录')
     }
-  })
-  if (trackingData.length > 0) {
-    const ws2 = XLSX.utils.json_to_sheet(trackingData)
-    XLSX.utils.book_append_sheet(wb, ws2, '跟踪记录')
   }
 
   // 工作表3: 投标信息
@@ -196,8 +206,8 @@ export const exportToPDF = (projects: ExportProject[], selectedFields?: string[]
 
     yPosition = (doc as any).lastAutoTable.finalY + 10
 
-    // 跟踪记录时间轴
-    if (project.tracking_records && project.tracking_records.length > 0) {
+    // 跟踪记录时间轴（仅当选中"历史跟踪进展"字段时导出）
+    if (fields.includes('历史跟踪进展') && project.tracking_records && project.tracking_records.length > 0) {
       doc.setFontSize(14)
       doc.text('Tracking Records Timeline', 20, yPosition)
       yPosition += 10

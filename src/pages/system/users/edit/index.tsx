@@ -3,6 +3,7 @@ import Taro from '@tarojs/taro'
 import {withRouteGuard} from '@/components/RouteGuard'
 import {supabase} from '@/client/supabase'
 import type {UserRole, Profile, Team} from '@/db/types'
+import {maskPhone} from '@/utils/format'
 import {RoleDisplayNames} from '@/db/types'
 
 function EditUser() {
@@ -147,7 +148,7 @@ function EditUser() {
           <div>
             <div className="text-xl text-foreground mb-2">手机号</div>
             <div className="border-2 border-input rounded px-4 py-3 bg-muted">
-              <div className="text-xl text-muted-foreground">{user.phone}</div>
+              <div className="text-xl text-muted-foreground">{maskPhone(user.phone)}</div>
             </div>
             <div className="text-sm text-muted-foreground mt-1">手机号不可修改</div>
           </div>

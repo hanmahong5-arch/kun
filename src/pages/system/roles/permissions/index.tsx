@@ -42,18 +42,16 @@ function RolePermissionsPage() {
     loadData()
   }, [loadData])
 
-  // 按类型分组权限
+  // 按模块分组权限
   const groupedPermissions = useMemo(() => {
-    const groups: Record<string, Permission[]> = {
-      menu: [],
-      operation: [],
-      data: []
-    }
+    const groups: Record<string, Permission[]> = {}
 
     permissions.forEach((perm) => {
-      if (groups[perm.type]) {
-        groups[perm.type].push(perm)
+      const module = perm.module || 'other'
+      if (!groups[module]) {
+        groups[module] = []
       }
+      groups[module].push(perm)
     })
 
     return groups
@@ -110,16 +108,28 @@ function RolePermissionsPage() {
     }
   }
 
-  const typeNames: Record<string, string> = {
-    menu: '菜单权限',
-    operation: '操作权限',
-    data: '数据权限'
+  const moduleNames: Record<string, string> = {
+    project_management: '项目管理',
+    task_management: '任务管理',
+    work_report: '工作汇报',
+    customer_management: '客户管理',
+    bidding_management: '投标管理',
+    data_center: '数据中心',
+    user_management: '用户管理',
+    system_settings: '系统设置',
+    team_management: '小组管理'
   }
 
-  const typeIcons: Record<string, string> = {
-    menu: 'i-mdi-menu',
-    operation: 'i-mdi-cog',
-    data: 'i-mdi-database'
+  const moduleIcons: Record<string, string> = {
+    project_management: 'i-mdi-folder-open',
+    task_management: 'i-mdi-clipboard-check',
+    work_report: 'i-mdi-file-document',
+    customer_management: 'i-mdi-account-group',
+    bidding_management: 'i-mdi-gavel',
+    data_center: 'i-mdi-chart-bar',
+    user_management: 'i-mdi-account-cog',
+    system_settings: 'i-mdi-cog',
+    team_management: 'i-mdi-account-multiple'
   }
 
   if (loading) {
@@ -152,23 +162,23 @@ function RolePermissionsPage() {
 
       {/* 权限列表 */}
       <div className="px-6 mt-4 flex flex-col gap-4">
-        {Object.entries(groupedPermissions).map(([type, perms]) => {
+        {Object.entries(groupedPermissions).map(([module, perms]) => {
           if (perms.length === 0) return null
 
           const allSelected = perms.every((p) => selectedIds.has(p.id))
 
           return (
-            <div key={type} className="bg-card rounded border border-border">
+            <div key={module} className="bg-card rounded border border-border">
               {/* 分类标题 */}
               <div className="px-4 py-3 border-b border-border flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <div className={`${typeIcons[type]} text-2xl text-primary`} />
-                  <div className="text-xl text-foreground font-bold">{typeNames[type]}</div>
+                  <div className={`${moduleIcons[module] || 'i-mdi-apps'} text-2xl text-primary`} />
+                  <div className="text-xl text-foreground font-bold">{moduleNames[module] || module}</div>
                   <div className="text-base text-muted-foreground">({perms.length})</div>
                 </div>
                 <button
                   type="button"
-                  onClick={() => handleSelectAll(type)}
+                  onClick={() => handleSelectAll(module)}
                   className="px-3 py-1 bg-primary/10 text-primary text-base rounded">
                   {allSelected ? '取消全选' : '全选'}
                 </button>

@@ -3,7 +3,8 @@ import Taro, {useDidShow} from '@tarojs/taro'
 import {Picker} from '@tarojs/components'
 import {withRouteGuard} from '@/components/RouteGuard'
 import {useAuth} from '@/contexts/AuthContext'
-import {getAllCustomers, getCustomerLastFollowUpDate, getAllProfiles} from '@/db/api'
+import {getAllCustomers, getTeamCustomers, getCustomerLastFollowUpDate, getAllProfiles} from '@/db/api'
+import {isLeaderOrAdmin} from '@/db/permissions-utils'
 import type {Customer, CustomerType, CustomerClassification, ContactInfo} from '@/db/types'
 
 function Customers() {
@@ -27,7 +28,7 @@ function Customers() {
       const users = await getAllProfiles()
       setAllUsers(Array.isArray(users) ? users : [])
       
-      const data = await getAllCustomers()
+      const data = isLeaderOrAdmin(profile) ? await getAllCustomers() : await getTeamCustomers(profile?.id as string)
       setCustomers(Array.isArray(data) ? data : [])
       
       // 加载每个客户的最近跟进时间
@@ -124,54 +125,86 @@ function Customers() {
     setSelectedResponsiblePersons((prev) => prev.filter((id) => id !== userId))
   }
 
-  const handleExport = () => {
-    // 准备导出数据
-    const exportData = filteredCustomers.map((customer) => {
-      const decisionContactsStr = customer.decision_contacts
-        ?.map((c: ContactInfo) => `${c.name}(${c.position}) ${c.phone}`)
-        .join('; ')
-      const influenceContactsStr = customer.influence_contacts
-        ?.map((c: ContactInfo) => `${c.name}(${c.position}) ${c.phone}`)
-        .join('; ')
-      const executionContactsStr = customer.execution_contacts
-        ?.map((c: ContactInfo) => `${c.name}(${c.position}) ${c.phone}`)
-        .join('; ')
-      const lastFollowUp = lastFollowUpDates[customer.id]
-        ? new Date(lastFollowUpDates[customer.id]).toLocaleDateString('zh-CN')
-        : '暂无'
+  const handleExport = async () => {
+    try {
+      Taro.showLoading({title: '准备导出数据...'})
 
-      return {
-        客户名称: customer.name,
-        客户类型: customer.type,
-        客户分级: customer.classification,
-        决策层联系人: decisionContactsStr || '暂无',
-        影响层联系人: influenceContactsStr || '暂无',
-        执行层联系人: executionContactsStr || '暂无',
-        合作供应商信息: customer.supplier_info || '',
-        公司发展情况: customer.company_development || '',
-        合作方向: customer.cooperation_direction || '',
-        合作历史: customer.cooperation_history || '',
-        最近跟进时间: lastFollowUp
+      const XLSX = await import('xlsx')
+
+      // Sheet 1: Customer list with all fields
+      const exportData = filteredCustomers.map((customer) => {
+        const decisionContactsStr = customer.decision_contacts
+          ?.map((c: ContactInfo) => `${c.name}(${c.position}) ${c.phone}`)
+          .join('; ')
+        const influenceContactsStr = customer.influence_contacts
+          ?.map((c: ContactInfo) => `${c.name}(${c.position}) ${c.phone}`)
+          .join('; ')
+        const executionContactsStr = customer.execution_contacts
+          ?.map((c: ContactInfo) => `${c.name}(${c.position}) ${c.phone}`)
+          .join('; ')
+        const lastFollowUp = lastFollowUpDates[customer.id]
+          ? new Date(lastFollowUpDates[customer.id]).toLocaleDateString('zh-CN')
+          : ''
+
+        return {
+          客户名称: customer.name,
+          客户类型: customer.type,
+          客户分级: customer.classification,
+          决策层联系人: decisionContactsStr || '',
+          影响层联系人: influenceContactsStr || '',
+          执行层联系人: executionContactsStr || '',
+          合作供应商信息: customer.supplier_info || '',
+          公司发展情况: customer.company_development || '',
+          合作方向: customer.cooperation_direction || '',
+          合作历史: customer.cooperation_history || '',
+          最近跟进时间: lastFollowUp,
+          创建时间: new Date(customer.created_at).toLocaleDateString('zh-CN')
+        }
+      })
+
+      const wb = XLSX.utils.book_new()
+      const ws1 = XLSX.utils.json_to_sheet(exportData)
+      XLSX.utils.book_append_sheet(wb, ws1, '客户列表')
+
+      // Sheet 2: Follow-up records
+      const {getCustomerFollowUps} = await import('@/db/api')
+      const followUpData: any[] = []
+      for (const customer of filteredCustomers) {
+        const records = await getCustomerFollowUps(customer.id)
+        records.forEach((r: any) => {
+          followUpData.push({
+            客户名称: customer.name,
+            跟进日期: r.follow_date ? new Date(r.follow_date).toLocaleDateString('zh-CN') : '',
+            跟进方式: r.follow_method || '',
+            跟进内容: r.content || '',
+            下步计划: r.next_plan || '',
+            下次跟进日期: r.next_follow_date ? new Date(r.next_follow_date).toLocaleDateString('zh-CN') : '',
+            记录人: r.profiles?.name || ''
+          })
+        })
       }
-    })
+      if (followUpData.length > 0) {
+        const ws2 = XLSX.utils.json_to_sheet(followUpData)
+        XLSX.utils.book_append_sheet(wb, ws2, '跟进记录')
+      }
 
-    // 转换为CSV格式
-    const headers = Object.keys(exportData[0] || {})
-    const csvContent = [
-      headers.join(','),
-      ...exportData.map((row) => headers.map((h) => `"${(row as any)[h] || ''}"`).join(','))
-    ].join('\n')
+      // Generate Excel file
+      const wbout = XLSX.write(wb, {bookType: 'xlsx', type: 'array'})
+      const blob = new Blob([wbout], {type: 'application/octet-stream'})
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `客户列表_${new Date().toLocaleDateString('zh-CN').replace(/\//g, '')}.xlsx`
+      link.click()
+      URL.revokeObjectURL(url)
 
-    // 创建下载
-    const blob = new Blob(['\ufeff' + csvContent], {type: 'text/csv;charset=utf-8;'})
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `客户列表_${new Date().toLocaleDateString('zh-CN').replace(/\//g, '')}.csv`
-    link.click()
-    URL.revokeObjectURL(url)
-
-    Taro.showToast({title: '导出成功', icon: 'success'})
+      Taro.hideLoading()
+      Taro.showToast({title: '导出成功', icon: 'success'})
+    } catch (error) {
+      console.error('导出失败:', error)
+      Taro.hideLoading()
+      Taro.showToast({title: '导出失败', icon: 'none'})
+    }
   }
 
   const getTypeColor = (type: CustomerType) => {
@@ -216,13 +249,22 @@ function Customers() {
       <div className="bg-gradient-primary px-6 py-6">
         <div className="flex items-center justify-between mb-2">
           <div className="text-2xl text-primary-foreground font-bold">客户管理</div>
-          <button
-            type="button"
-            onClick={handleExport}
-            className="px-4 py-2 bg-primary-foreground/20 text-primary-foreground text-base rounded flex items-center gap-1 leading-none">
-            <div className="i-mdi-download text-lg" />
-            <span>导出</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => Taro.navigateTo({url: '/pages/customers/analytics/index'})}
+              className="px-4 py-2 bg-primary-foreground/20 text-primary-foreground text-base rounded flex items-center gap-1 leading-none">
+              <div className="i-mdi-chart-bar text-lg" />
+              <span>分析</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleExport}
+              className="px-4 py-2 bg-primary-foreground/20 text-primary-foreground text-base rounded flex items-center gap-1 leading-none">
+              <div className="i-mdi-download text-lg" />
+              <span>导出</span>
+            </button>
+          </div>
         </div>
         <div className="text-base text-primary-foreground/80">客户档案与跟进记录</div>
       </div>

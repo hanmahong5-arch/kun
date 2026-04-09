@@ -1,4 +1,4 @@
-import {useCallback, useEffect, useState} from 'react'
+import {useCallback, useEffect, useMemo, useState} from 'react'
 import Taro, {useDidShow} from '@tarojs/taro'
 import {withRouteGuard} from '@/components/RouteGuard'
 import {useAuth} from '@/contexts/AuthContext'
@@ -91,7 +91,7 @@ function Home() {
         const {data: usersData} = await supabase
           .from('profiles')
           .select('id, name')
-          .eq('status', 'approved')
+          .not('name', 'is', null)
           .order('name')
         
         if (usersData) {
@@ -148,12 +148,21 @@ function Home() {
     }
   }, [])
 
-  // 加载可选的项目列表（本月有预计开标日期的项目）
+  // 计算当前季度
+  const currentQuarter = useMemo(() => {
+    const month = new Date().getMonth()
+    return Math.floor(month / 3) + 1
+  }, [])
+
+  const quarterLabel = `${currentQuarter === 1 ? '一' : currentQuarter === 2 ? '二' : currentQuarter === 3 ? '三' : '四'}季度`
+
+  // 加载可选的项目列表（本季度有预计开标日期的项目）
   const loadAvailableProjects = useCallback(async () => {
     try {
       const now = new Date()
-      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
-      const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+      const quarterStartMonth = (currentQuarter - 1) * 3
+      const startOfMonth = new Date(now.getFullYear(), quarterStartMonth, 1)
+      const endOfMonth = new Date(now.getFullYear(), quarterStartMonth + 3, 0)
 
       const {data, error} = await supabase
         .from('projects')
@@ -471,7 +480,7 @@ function Home() {
               </button>
             )}
           </div>
-          {profile && <TeamGoals isAdmin={isAdminRole} userId={profile.id as string} />}
+          {profile && <TeamGoals isAdmin={isAdminRole || isLeaderRole} userId={profile.id as string} />}
         </div>
       </div>
 
@@ -479,81 +488,97 @@ function Home() {
       <div className="px-6 mt-4">
         <div className="text-xl text-foreground font-bold mb-3">快捷入口</div>
         <div className="grid grid-cols-3 gap-3">
-          {/* 领导数据中心（领导和管理员可见） */}
-          {hasDataCenterAccess && (
-            <button
-              type="button"
-              onClick={() => Taro.navigateTo({url: '/pages/leader/dashboard/index'})}
-              className="py-4 bg-gradient-primary rounded flex flex-col items-center justify-center gap-2 border border-primary/20">
-              <div className="i-mdi-chart-box text-3xl text-primary-foreground" />
-              <span className="text-base text-primary-foreground font-bold">数据中心</span>
-            </button>
+          {/* 领导角色：只显示数据中心和知识库 */}
+          {isLeaderRole ? (
+            <>
+              <button
+                type="button"
+                onClick={() => Taro.navigateTo({url: '/pages/leader/dashboard/index'})}
+                className="py-4 bg-gradient-primary rounded flex flex-col items-center justify-center gap-2 border border-primary/20">
+                <div className="i-mdi-chart-box text-3xl text-primary-foreground" />
+                <span className="text-base text-primary-foreground font-bold">数据中心</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => Taro.navigateTo({url: '/pages/documents/index'})}
+                className="py-4 bg-card border-2 border-border rounded flex flex-col items-center justify-center gap-2">
+                <div className="i-mdi-book-open-variant text-3xl text-primary" />
+                <span className="text-base text-foreground">知识库</span>
+              </button>
+            </>
+          ) : (
+            <>
+              {/* 管理员：数据中心 */}
+              {isAdminRole && (
+                <button
+                  type="button"
+                  onClick={() => Taro.navigateTo({url: '/pages/leader/dashboard/index'})}
+                  className="py-4 bg-gradient-primary rounded flex flex-col items-center justify-center gap-2 border border-primary/20">
+                  <div className="i-mdi-chart-box text-3xl text-primary-foreground" />
+                  <span className="text-base text-primary-foreground font-bold">数据中心</span>
+                </button>
+              )}
+
+              {/* 管理员：系统设置 */}
+              {isAdminRole && (
+                <button
+                  type="button"
+                  onClick={() => Taro.navigateTo({url: '/pages/system/settings/index'})}
+                  className="py-4 bg-card border-2 border-border rounded flex flex-col items-center justify-center gap-2">
+                  <div className="i-mdi-cog text-3xl text-primary" />
+                  <span className="text-base text-foreground">系统设置</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => Taro.navigateTo({url: '/pages/reports/index'})}
+                className="py-4 bg-card border-2 border-border rounded flex flex-col items-center justify-center gap-2">
+                <div className="i-mdi-file-document-edit text-3xl text-primary" />
+                <span className="text-base text-foreground">工作汇报</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => Taro.navigateTo({url: '/pages/projects/index'})}
+                className="py-4 bg-card border-2 border-border rounded flex flex-col items-center justify-center gap-2">
+                <div className="i-mdi-briefcase text-3xl text-primary" />
+                <span className="text-base text-foreground">项目管理</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => Taro.navigateTo({url: '/pages/customers/index'})}
+                className="py-4 bg-card border-2 border-border rounded flex flex-col items-center justify-center gap-2">
+                <div className="i-mdi-account-group text-3xl text-primary" />
+                <span className="text-base text-foreground">客户管理</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => Taro.navigateTo({url: '/pages/tasks/index'})}
+                className="py-4 bg-card border-2 border-border rounded flex flex-col items-center justify-center gap-2">
+                <div className="i-mdi-clipboard-check text-3xl text-primary" />
+                <span className="text-base text-foreground">任务管理</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => Taro.navigateTo({url: '/pages/bids/index'})}
+                className="py-4 bg-card border-2 border-border rounded flex flex-col items-center justify-center gap-2">
+                <div className="i-mdi-gavel text-3xl text-primary" />
+                <span className="text-base text-foreground">投标管理</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => Taro.navigateTo({url: '/pages/documents/index'})}
+                className="py-4 bg-card border-2 border-border rounded flex flex-col items-center justify-center gap-2">
+                <div className="i-mdi-book-open-variant text-3xl text-primary" />
+                <span className="text-base text-foreground">知识库</span>
+              </button>
+            </>
           )}
-
-          {/* 系统设置（仅管理员可见） */}
-          {isAdminRole && (
-            <button
-              type="button"
-              onClick={() => Taro.navigateTo({url: '/pages/system/settings/index'})}
-              className="py-4 bg-card border-2 border-border rounded flex flex-col items-center justify-center gap-2">
-              <div className="i-mdi-cog text-3xl text-primary" />
-              <span className="text-base text-foreground">系统设置</span>
-            </button>
-          )}
-
-          {/* 工作汇报 */}
-          <button
-            type="button"
-            onClick={() => Taro.navigateTo({url: '/pages/reports/index'})}
-            className="py-4 bg-card border-2 border-border rounded flex flex-col items-center justify-center gap-2">
-            <div className="i-mdi-file-document-edit text-3xl text-primary" />
-            <span className="text-base text-foreground">工作汇报</span>
-          </button>
-
-          {/* 项目管理 */}
-          <button
-            type="button"
-            onClick={() => Taro.navigateTo({url: '/pages/projects/index'})}
-            className="py-4 bg-card border-2 border-border rounded flex flex-col items-center justify-center gap-2">
-            <div className="i-mdi-briefcase text-3xl text-primary" />
-            <span className="text-base text-foreground">项目管理</span>
-          </button>
-
-          {/* 客户管理 */}
-          <button
-            type="button"
-            onClick={() => Taro.navigateTo({url: '/pages/customers/index'})}
-            className="py-4 bg-card border-2 border-border rounded flex flex-col items-center justify-center gap-2">
-            <div className="i-mdi-account-group text-3xl text-primary" />
-            <span className="text-base text-foreground">客户管理</span>
-          </button>
-
-          {/* 任务管理 */}
-          <button
-            type="button"
-            onClick={() => Taro.navigateTo({url: '/pages/tasks/index'})}
-            className="py-4 bg-card border-2 border-border rounded flex flex-col items-center justify-center gap-2">
-            <div className="i-mdi-clipboard-check text-3xl text-primary" />
-            <span className="text-base text-foreground">任务管理</span>
-          </button>
-
-          {/* 投标管理 */}
-          <button
-            type="button"
-            onClick={() => Taro.navigateTo({url: '/pages/bids/index'})}
-            className="py-4 bg-card border-2 border-border rounded flex flex-col items-center justify-center gap-2">
-            <div className="i-mdi-gavel text-3xl text-primary" />
-            <span className="text-base text-foreground">投标管理</span>
-          </button>
-
-          {/* 知识库 */}
-          <button
-            type="button"
-            onClick={() => Taro.navigateTo({url: '/pages/documents/index'})}
-            className="py-4 bg-card border-2 border-border rounded flex flex-col items-center justify-center gap-2">
-            <div className="i-mdi-book-open-variant text-3xl text-primary" />
-            <span className="text-base text-foreground">知识库</span>
-          </button>
         </div>
       </div>
 
@@ -659,11 +684,54 @@ function Home() {
         </div>
       )}
 
-      {/* 本月计划开标项目 */}
+      {/* 投标阶段项目 */}
+      <div className="px-6 mt-4 mb-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-xl text-foreground font-bold">投标阶段项目</div>
+          <div className="text-base text-muted-foreground">{biddingProjects.length} 个项目</div>
+        </div>
+        {biddingProjects.length === 0 ? (
+          <div className="bg-card rounded p-8 text-center border border-border">
+            <div className="i-mdi-file-document-outline text-6xl text-muted-foreground mb-2" />
+            <div className="text-base text-muted-foreground">暂无投标项目</div>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {biddingProjects.map((project) => (
+              <div
+                key={project.id}
+                onClick={() => handleViewProject(project.id)}
+                className="bg-card rounded p-4 border border-border">
+                <div className="flex items-start justify-between mb-2">
+                  <div className="flex-1">
+                    <div className="text-xl text-foreground font-bold mb-1">{project.name}</div>
+                    <div className="text-base text-muted-foreground">{project.construction_unit}</div>
+                  </div>
+                  <div className="px-3 py-1 bg-warning/10 text-warning text-base rounded">投标中</div>
+                </div>
+                <div className="flex items-center gap-4 mt-3 pt-3 border-t border-border">
+                  <div className="flex items-center gap-2">
+                    <div className="i-mdi-tag text-xl text-muted-foreground" />
+                    <span className="text-base text-foreground">{project.project_type}</span>
+                  </div>
+                  {project.investment_amount && (
+                    <div className="flex items-center gap-2">
+                      <div className="i-mdi-currency-cny text-xl text-muted-foreground" />
+                      <span className="text-base text-foreground">{(project.investment_amount / 10000).toFixed(2)} 亿元</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* 季度计划开标项目 */}
       <div className="px-6 mt-4 mb-6">
         <div className="bg-card rounded p-5 border border-border">
           <div className="flex items-center justify-between mb-4">
-            <div className="text-xl text-foreground font-bold">{new Date().getMonth() + 1}月份计划开标项目</div>
+            <div className="text-xl text-foreground font-bold">{quarterLabel}计划开标项目</div>
             {isAdminRole && (
               <button
                 type="button"
@@ -678,7 +746,7 @@ function Home() {
           {featuredBiddingProjects.length === 0 ? (
             <div className="text-center py-8">
               <div className="i-mdi-calendar-clock text-6xl text-muted-foreground mb-2" />
-              <div className="text-base text-muted-foreground">暂无{new Date().getMonth() + 1}月计划开标项目</div>
+              <div className="text-base text-muted-foreground">暂无{quarterLabel}计划开标项目</div>
               {isAdminRole && (
                 <div className="text-sm text-muted-foreground mt-1">点击"选择项目"添加</div>
               )}
@@ -822,50 +890,6 @@ function Home() {
           </div>
         )}
       </div>
-      {/* 投标阶段项目 */}
-      <div className="px-6 mt-6">
-        <div className="flex items-center justify-between mb-3">
-          <div className="text-xl text-foreground font-bold">投标阶段项目</div>
-          <div className="text-base text-muted-foreground">{biddingProjects.length} 个项目</div>
-        </div>
-
-        {biddingProjects.length === 0 ? (
-          <div className="bg-card rounded p-8 text-center border border-border">
-            <div className="i-mdi-file-document-outline text-6xl text-muted-foreground mb-2" />
-            <div className="text-base text-muted-foreground">暂无投标项目</div>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-3">
-            {biddingProjects.map((project) => (
-              <div
-                key={project.id}
-                onClick={() => handleViewProject(project.id)}
-                className="bg-card rounded p-4 border border-border">
-                <div className="flex items-start justify-between mb-2">
-                  <div className="flex-1">
-                    <div className="text-xl text-foreground font-bold mb-1">{project.name}</div>
-                    <div className="text-base text-muted-foreground">{project.construction_unit}</div>
-                  </div>
-                  <div className="px-3 py-1 bg-warning/10 text-warning text-base rounded">投标中</div>
-                </div>
-                <div className="flex items-center gap-4 mt-3 pt-3 border-t border-border">
-                  <div className="flex items-center gap-2">
-                    <div className="i-mdi-tag text-xl text-muted-foreground" />
-                    <span className="text-base text-foreground">{project.project_type}</span>
-                  </div>
-                  {project.investment_amount && (
-                    <div className="flex items-center gap-2">
-                      <div className="i-mdi-currency-cny text-xl text-muted-foreground" />
-                      <span className="text-base text-foreground">{(project.investment_amount / 10000).toFixed(2)} 亿元</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
       {/* 任务筛选弹窗 */}
       {showTaskFilter && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-6">
@@ -1031,13 +1055,13 @@ function Home() {
       {showProjectSelector && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-6">
           <div className="bg-card rounded p-6 w-full max-w-md max-h-[80vh] flex flex-col">
-            <div className="text-xl text-foreground font-bold mb-4">选择{new Date().getMonth() + 1}月计划开标项目</div>
+            <div className="text-xl text-foreground font-bold mb-4">选择{quarterLabel}计划开标项目</div>
             
             {/* 项目列表 */}
             <div className="flex-1 overflow-y-auto">
               {availableProjects.length === 0 ? (
                 <div className="text-center py-8 text-base text-muted-foreground">
-                  {new Date().getMonth() + 1}月暂无计划开标项目
+                  {quarterLabel}暂无计划开标项目
                 </div>
               ) : (
                 <div className="flex flex-col gap-2">

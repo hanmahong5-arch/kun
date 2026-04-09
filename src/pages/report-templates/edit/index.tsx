@@ -27,6 +27,7 @@ function ReportTemplateEdit() {
   const [editingField, setEditingField] = useState<FieldFormData | null>(null)
   const [departments, setDepartments] = useState<string[]>([])
   const [selectedDepartments, setSelectedDepartments] = useState<string[]>([])
+  const [newDeptName, setNewDeptName] = useState('')
   const [showChangeDialog, setShowChangeDialog] = useState(false)
   const [changeDescription, setChangeDescription] = useState('')
   const [currentVersion, setCurrentVersion] = useState(1)
@@ -101,14 +102,19 @@ function ReportTemplateEdit() {
   }, [templateId])
 
   useEffect(() => {
-    // 加载所有部门
+    // Load departments from profiles + existing mappings
     const loadDepartments = async () => {
       try {
-        const {data, error} = await supabase.from('profiles').select('department').not('department', 'is', null)
+        const [{data: profileDepts}, {data: mappingDepts}] = await Promise.all([
+          supabase.from('profiles').select('department').not('department', 'is', null),
+          supabase.from('department_template_mapping').select('department')
+        ])
 
-        if (error) throw error
-        const uniqueDepts = Array.from(new Set(data?.map((p) => p.department).filter(Boolean) as string[]))
-        setDepartments(uniqueDepts)
+        const allDepts = [
+          ...(profileDepts?.map((p) => p.department).filter(Boolean) || []),
+          ...(mappingDepts?.map((m) => m.department).filter(Boolean) || [])
+        ]
+        setDepartments(Array.from(new Set(allDepts as string[])))
       } catch (error) {
         console.error('加载部门失败:', error)
       }
@@ -562,10 +568,8 @@ function ReportTemplateEdit() {
           <div className="text-xl text-foreground font-bold mb-3">部门关联</div>
           <div className="text-base text-muted-foreground mb-3">选择使用此模板的部门（不选择则所有部门可用）</div>
 
-          {departments.length === 0 ? (
-            <div className="text-center py-4 text-muted-foreground">暂无部门数据</div>
-          ) : (
-            <div className="flex flex-col gap-2">
+          {departments.length > 0 && (
+            <div className="flex flex-col gap-2 mb-3">
               {departments.map((dept) => (
                 <div
                   key={dept}
@@ -582,6 +586,36 @@ function ReportTemplateEdit() {
               ))}
             </div>
           )}
+
+          {/* Add new department */}
+          <div className="flex gap-2">
+            <div className="flex-1 border-2 border-input rounded px-3 py-2 bg-background">
+              <input
+                type="text"
+                value={newDeptName}
+                onChange={(e) => setNewDeptName(e.target.value)}
+                placeholder="输入新部门名称"
+                className="w-full text-base text-foreground bg-transparent outline-none"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                const name = newDeptName.trim()
+                if (!name) return
+                if (!departments.includes(name)) {
+                  setDepartments((prev) => [...prev, name])
+                }
+                if (!selectedDepartments.includes(name)) {
+                  setSelectedDepartments((prev) => [...prev, name])
+                }
+                setNewDeptName('')
+              }}
+              className="px-4 py-2 bg-primary text-primary-foreground text-base rounded flex items-center gap-1">
+              <div className="i-mdi-plus text-lg" />
+              添加
+            </button>
+          </div>
         </div>
       </div>
 

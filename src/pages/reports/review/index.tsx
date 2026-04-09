@@ -16,6 +16,8 @@ function ReportReviewPage() {
   const [reviewingReportId, setReviewingReportId] = useState<string | null>(null)
   const [reviewComment, setReviewComment] = useState('')
   const [templateFieldsMap, setTemplateFieldsMap] = useState<Record<string, WeeklyReportTemplateField[]>>({})
+  const [selectedUserId, setSelectedUserId] = useState('')
+  const [userList, setUserList] = useState<Array<{id: string; name: string}>>([])
 
   const loadReports = useCallback(async () => {
     if (!profile) return
@@ -44,6 +46,11 @@ function ReportReviewPage() {
         query = query.lte('week_end_date', endDate)
       }
 
+      // 筛选负责人
+      if (selectedUserId) {
+        query = query.eq('user_id', selectedUserId)
+      }
+
       const {data, error} = await query
 
       if (error) throw error
@@ -64,7 +71,20 @@ function ReportReviewPage() {
     } finally {
       setLoading(false)
     }
-  }, [profile, filter, startDate, endDate])
+  }, [profile, filter, startDate, endDate, selectedUserId])
+
+  // Load user list for filter (include all users who exist in profiles, not just approved)
+  useEffect(() => {
+    const loadUsers = async () => {
+      const {data} = await supabase
+        .from('profiles')
+        .select('id, name')
+        .not('name', 'is', null)
+        .order('name')
+      if (data) setUserList(data.filter((u) => u.name))
+    }
+    loadUsers()
+  }, [])
 
   // 加载模板字段
   const loadTemplateFields = useCallback(async (templateIds: string[]) => {
@@ -216,6 +236,22 @@ function ReportReviewPage() {
             </div>
           </div>
 
+          {/* 负责人筛选 */}
+          <div className="mb-4">
+            <div className="text-xl text-foreground font-bold mb-2">填报人</div>
+            <div className="border-2 border-input rounded px-3 py-2 bg-background">
+              <select
+                value={selectedUserId}
+                onChange={(e) => setSelectedUserId(e.target.value)}
+                className="w-full text-base text-foreground bg-transparent outline-none">
+                <option value="">全部人员</option>
+                {userList.map((u) => (
+                  <option key={u.id} value={u.id}>{u.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
           {/* 时间范围筛选 */}
           <div className="flex gap-3">
             <div className="flex-1">
@@ -276,7 +312,9 @@ function ReportReviewPage() {
                 {/* 周报内容预览 */}
                 <div className="mb-3 p-3 bg-muted/30 rounded">
                   <div className="text-base text-foreground line-clamp-3">
-                    {report.core_work || '暂无内容'}
+                    {report.core_work || (report.custom_fields && typeof report.custom_fields === 'object'
+                      ? Object.values(report.custom_fields as Record<string, string>).filter(Boolean).join('；') || '暂无内容'
+                      : '暂无内容')}
                   </div>
                 </div>
 

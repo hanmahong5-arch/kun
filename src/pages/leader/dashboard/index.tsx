@@ -2,9 +2,22 @@ import {useState, useCallback, useEffect} from 'react'
 import Taro from '@tarojs/taro'
 import {withRouteGuard} from '@/components/RouteGuard'
 import {useAuth} from '@/contexts/AuthContext'
+import {supabase} from '@/client/supabase'
 import {getKPIIndicatorsWithLatestData, getUnreadAlerts} from '@/db/leaderDashboard'
 import {isLeaderOrAdmin} from '@/db/permissions-utils'
 import type {KPIIndicator, ReportAlert} from '@/db/types'
+
+interface DistributionItem {
+  label: string
+  count: number
+  amount?: number
+}
+
+interface CategoryDistribution {
+  title: string
+  items: DistributionItem[]
+  total?: number
+}
 
 function LeaderDashboard() {
   const {profile} = useAuth()
@@ -14,6 +27,7 @@ function LeaderDashboard() {
   const [alerts, setAlerts] = useState<ReportAlert[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const [showDistribution, setShowDistribution] = useState<CategoryDistribution | null>(null)
 
   // 允许超级管理员、系统管理员和领导访问
   const hasAccess = isLeaderOrAdmin(profile)
@@ -47,6 +61,93 @@ function LeaderDashboard() {
     Taro.showToast({title: '刷新成功', icon: 'success', duration: 1500})
   }
 
+  // Load distribution data for a category
+  const handleShowDistribution = async (cat: string) => {
+    try {
+      Taro.showLoading({title: '加载中...'})
+
+      if (cat === 'financial') {
+        // Project type distribution for won bids
+        const {data: projects} = await supabase
+          .from('projects')
+          .select('project_type, investment_amount')
+          .eq('stage', '已中标')
+
+        const typeMap = new Map<string, {count: number; amount: number}>()
+        ;(projects || []).forEach((p) => {
+          const type = p.project_type || '其他'
+          const prev = typeMap.get(type) || {count: 0, amount: 0}
+          typeMap.set(type, {count: prev.count + 1, amount: prev.amount + (p.investment_amount || 0)})
+        })
+
+        setShowDistribution({
+          title: '中标项目类型分布',
+          items: Array.from(typeMap.entries()).map(([label, v]) => ({label, count: v.count, amount: v.amount})),
+          total: (projects || []).length
+        })
+      } else if (cat === 'project') {
+        // Classification distribution
+        const {data: projects} = await supabase
+          .from('projects')
+          .select('classification, stage, investment_amount')
+
+        const classMap = new Map<string, {count: number; amount: number}>()
+        let wonCount = 0
+        let trackingCount = 0
+        const classLabels: Record<string, string> = {
+          a_lock: 'A跟', a_compete: 'A争', b_class: 'B类', c_class: 'C类', d_class: 'D类'
+        }
+
+        ;(projects || []).forEach((p) => {
+          const label = classLabels[p.classification] || p.classification || '未分类'
+          const prev = classMap.get(label) || {count: 0, amount: 0}
+          classMap.set(label, {count: prev.count + 1, amount: prev.amount + (p.investment_amount || 0)})
+          if (p.stage === '已中标') wonCount++
+          else trackingCount++
+        })
+
+        setShowDistribution({
+          title: '项目分级分布',
+          items: [
+            {label: '已中标', count: wonCount},
+            {label: '在跟踪', count: trackingCount},
+            ...Array.from(classMap.entries()).map(([label, v]) => ({label, count: v.count, amount: v.amount}))
+          ],
+          total: (projects || []).length
+        })
+      } else if (cat === 'customer') {
+        const {data: customers} = await supabase
+          .from('customers')
+          .select('type, classification')
+
+        const total = (customers || []).length
+        const newCount = (customers || []).filter((c) => c.classification === '新客户').length
+        const oldCount = (customers || []).filter((c) => c.classification === '老客户').length
+
+        const typeMap = new Map<string, number>()
+        ;(customers || []).forEach((c) => {
+          const type = c.type || '其他'
+          typeMap.set(type, (typeMap.get(type) || 0) + 1)
+        })
+
+        setShowDistribution({
+          title: '客户分布',
+          items: [
+            {label: '新客户', count: newCount},
+            {label: '老客户', count: oldCount},
+            ...Array.from(typeMap.entries()).map(([label, count]) => ({label, count}))
+          ],
+          total
+        })
+      }
+    } catch (error) {
+      console.error('加载分布数据失败:', error)
+      Taro.showToast({title: '加载失败', icon: 'none'})
+    } finally {
+      Taro.hideLoading()
+    }
+  }
+
   // 计算完成率
   const calculateCompletionRate = (current?: number, target?: number) => {
     if (!current || !target || target === 0) return 0
@@ -73,10 +174,9 @@ function LeaderDashboard() {
   )
 
   const categoryNames: Record<string, string> = {
-    financial: '财务指标',
+    financial: '中标指标',
     project: '项目指标',
-    customer: '客户指标',
-    operation: '运营指标'
+    customer: '客户指标'
   }
 
   if (!profile || !hasAccess) {
@@ -136,21 +236,33 @@ function LeaderDashboard() {
         </div>
       ) : (
         <div className="px-6 mt-4 space-y-6">
-          {Object.entries(groupedKPI).map(([category, kpis]) => (
+          {Object.entries(groupedKPI).filter(([category]) => category in categoryNames).map(([category, kpis]) => (
             <div key={category}>
-              <div className="text-xl text-foreground font-bold mb-3 flex items-center gap-2">
-                <div
-                  className={`i-mdi-${
-                    category === 'financial'
-                      ? 'currency-cny'
-                      : category === 'project'
-                        ? 'briefcase'
-                        : category === 'customer'
-                          ? 'account-group'
-                          : 'chart-line'
-                  } text-2xl text-primary`}
-                />
-                <span>{categoryNames[category] || category}</span>
+              <div className="text-xl text-foreground font-bold mb-3 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div
+                    className={`i-mdi-${
+                      category === 'financial'
+                        ? 'currency-cny'
+                        : category === 'project'
+                          ? 'briefcase'
+                          : category === 'customer'
+                            ? 'account-group'
+                            : 'chart-line'
+                    } text-2xl text-primary`}
+                  />
+                  <span>{categoryNames[category] || category}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleShowDistribution(category)
+                  }}
+                  className="text-sm text-primary font-normal flex items-center gap-1">
+                  <span>关联展示</span>
+                  <div className="i-mdi-chevron-right text-base" />
+                </button>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -215,35 +327,63 @@ function LeaderDashboard() {
         </div>
       )}
 
-      {/* 快捷入口 */}
-      <div className="px-6 mt-6">
-        <div className="text-xl text-foreground font-bold mb-3">快捷入口</div>
-        <div className="grid grid-cols-3 gap-3">
-          <button
-            type="button"
-            onClick={() => Taro.navigateTo({url: '/pages/leader/reports/index'})}
-            className="py-4 bg-card border-2 border-border rounded flex flex-col items-center justify-center gap-2">
-            <div className="i-mdi-file-chart text-3xl text-primary" />
-            <span className="text-base text-foreground">专项报表</span>
-          </button>
+      {/* Distribution modal */}
+      {showDistribution && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center px-6">
+          <div className="w-full max-w-lg bg-card rounded-xl p-6 max-h-[80vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <div className="text-xl text-foreground font-bold">{showDistribution.title}</div>
+              <button
+                type="button"
+                onClick={() => setShowDistribution(null)}
+                className="p-1 text-muted-foreground">
+                <div className="i-mdi-close text-2xl" />
+              </button>
+            </div>
 
-          <button
-            type="button"
-            onClick={() => Taro.navigateTo({url: '/pages/leader/analysis/index'})}
-            className="py-4 bg-card border-2 border-border rounded flex flex-col items-center justify-center gap-2">
-            <div className="i-mdi-chart-box text-3xl text-primary" />
-            <span className="text-base text-foreground">深度分析</span>
-          </button>
+            {showDistribution.total !== undefined && (
+              <div className="text-base text-muted-foreground mb-4">
+                共计 <span className="text-foreground font-bold">{showDistribution.total}</span> 项
+              </div>
+            )}
 
-          <button
-            type="button"
-            onClick={() => Taro.navigateTo({url: '/pages/leader/export/index'})}
-            className="py-4 bg-card border-2 border-border rounded flex flex-col items-center justify-center gap-2">
-            <div className="i-mdi-download text-3xl text-primary" />
-            <span className="text-base text-foreground">数据导出</span>
-          </button>
+            <div className="flex flex-col gap-3">
+              {showDistribution.items.map((item) => {
+                const pct = showDistribution.total && showDistribution.total > 0
+                  ? Math.round((item.count / showDistribution.total) * 100)
+                  : 0
+                return (
+                  <div key={item.label}>
+                    <div className="flex items-center justify-between text-base mb-1">
+                      <span className="text-foreground">{item.label}</span>
+                      <span className="text-muted-foreground">
+                        {item.count} 个{item.amount !== undefined ? ` / ${item.amount} 万元` : ''} ({pct}%)
+                      </span>
+                    </div>
+                    <div className="w-full h-3 bg-muted rounded-full overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-primary transition-all"
+                        style={{width: `${Math.max(pct, 2)}%`}}
+                      />
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            {showDistribution.items.length === 0 && (
+              <div className="text-center py-6 text-muted-foreground">暂无数据</div>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setShowDistribution(null)}
+              className="w-full mt-6 py-3 bg-muted text-foreground text-base rounded">
+              关闭
+            </button>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   )
 }

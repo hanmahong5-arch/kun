@@ -327,24 +327,34 @@ Deno.serve(async (req) => {
     logData.completed_steps.push('角色信息获取成功')
 
     // ========== 步骤3：创建用户档案（profiles表） ==========
-    
+
     logData.completed_steps.push('开始创建Profile')
-    
+
     /**
      * 在profiles表中创建用户档案
-     * 
+     *
      * 关键字段：
      * - status: 'approved' - 用户状态为"已激活"，可立即登录
      * - approved_at: 当前时间 - 记录激活时间
-     * - role: 第一个角色的code - 兼容旧系统
-     * 
+     * - role: 映射到旧版ENUM值 - 兼容旧系统
+     *
      * 这是实现"用户创建后立即可用"的核心配置
      */
+    // 新角色code到旧版user_role ENUM的映射
+    const roleCodeToEnum: Record<string, string> = {
+      super_admin: 'super_admin',
+      company_leader: 'leader',
+      business_center_staff: 'market_staff',
+      data_clerk: 'data_clerk',
+      system_admin: 'system_admin'
+    }
+    const profileRole = roleCodeToEnum[firstRole.code] || 'market_staff'
+
     const {error: profileError} = await supabaseAdmin.from('profiles').insert({
       id: userId,
       phone,
       name,
-      role: firstRole.code,  // 兼容旧系统：使用第一个角色的code
+      role: profileRole,  // 兼容旧系统：映射到有效的ENUM值
       job_level: job_level || null,
       department: department || null,
       status: 'approved',  // 关键：状态设为approved，用户可立即登录

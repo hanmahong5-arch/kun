@@ -152,6 +152,77 @@ export async function getAllProjects() {
   return Array.isArray(data) ? data : []
 }
 
+// Get projects visible to a user's team members
+export async function getTeamProjects(userId: string) {
+  // 1. Find which teams the user belongs to
+  const {data: userTeams} = await supabase
+    .from('user_teams')
+    .select('team_id')
+    .eq('user_id', userId)
+
+  if (!userTeams || userTeams.length === 0) {
+    // No team: fall back to own projects only
+    return getMyProjects(userId)
+  }
+
+  const teamIds = userTeams.map(t => t.team_id)
+
+  // 2. Find all members in those teams
+  const {data: teamMembers} = await supabase
+    .from('user_teams')
+    .select('user_id')
+    .in('team_id', teamIds)
+
+  if (!teamMembers || teamMembers.length === 0) {
+    return getMyProjects(userId)
+  }
+
+  const memberIds = [...new Set(teamMembers.map(m => m.user_id))]
+
+  // 3. Get projects for all team members
+  const {data, error} = await supabase
+    .from('projects')
+    .select('*, profiles!projects_responsible_person_id_fkey(name)')
+    .in('responsible_person_id', memberIds)
+    .order('created_at', {ascending: false})
+  if (error) throw error
+  return Array.isArray(data) ? data : []
+}
+
+// Get customers visible to a user's team members
+export async function getTeamCustomers(userId: string) {
+  const {data: userTeams} = await supabase
+    .from('user_teams')
+    .select('team_id')
+    .eq('user_id', userId)
+
+  if (!userTeams || userTeams.length === 0) {
+    const {data, error} = await supabase
+      .from('customers')
+      .select('*')
+      .eq('responsible_person_id', userId)
+      .order('created_at', {ascending: false})
+    if (error) throw error
+    return Array.isArray(data) ? data : []
+  }
+
+  const teamIds = userTeams.map(t => t.team_id)
+  const {data: teamMembers} = await supabase
+    .from('user_teams')
+    .select('user_id')
+    .in('team_id', teamIds)
+
+  const memberIds = [...new Set((teamMembers || []).map(m => m.user_id))]
+
+  const {data, error} = await supabase
+    .from('customers')
+    .select('*')
+    .in('responsible_person_id', memberIds)
+    .order('created_at', {ascending: false})
+  if (error) throw error
+  return Array.isArray(data) ? data : []
+}
+
 export async function getProjectById(id: string) {
   const {data, error} = await supabase
     .from('projects')
@@ -332,11 +403,12 @@ export async function createTask(task: Omit<Task, 'id' | 'created_at' | 'updated
   return data as Task | null
 }
 
+// Returns tasks where user is assigner, assignee, or collaborator
 export async function getMyTasks(userId: string) {
   const {data, error} = await supabase
     .from('tasks')
     .select('*, profiles!tasks_assigned_by_fkey(name)')
-    .or(`responsible_person_id.eq.${userId},collaborators.cs.{${userId}}`)
+    .or(`responsible_person_id.eq.${userId},assigned_by.eq.${userId},collaborators.cs.{${userId}}`)
     .order('deadline', {ascending: true})
   if (error) throw error
   return Array.isArray(data) ? data : []

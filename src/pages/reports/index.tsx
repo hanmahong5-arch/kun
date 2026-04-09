@@ -234,8 +234,8 @@ function Reports() {
         </div>
       </div>
 
-      {/* 模板配置（仅管理员） */}
-      {canViewAllReports && (
+      {/* 模板配置（仅管理员可见） */}
+      {profile && (profile.role === 'system_admin' || profile.role === 'super_admin') && (
         <div className="px-6 mt-4">
           <div
             onClick={() => Taro.navigateTo({url: '/pages/report-templates/list/index'})}

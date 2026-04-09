@@ -19,6 +19,7 @@ const pages = [
   'pages/projects/analytics/index',
   'pages/projects/timeline/index',
   'pages/customers/index',
+  'pages/customers/analytics/index',
   'pages/customers/detail/index',
   'pages/customers/create/index',
   'pages/customers/edit/index',

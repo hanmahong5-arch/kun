@@ -239,7 +239,7 @@ export async function setUserRoles(
 export async function getRolePermissionCodes(roleId: string): Promise<string[]> {
   const {data, error} = await supabase
     .from('role_permissions')
-    .select('permission_code')
+    .select('permission_id, permissions(code)')
     .eq('role_id', roleId)
 
   if (error) {
@@ -249,13 +249,15 @@ export async function getRolePermissionCodes(roleId: string): Promise<string[]> 
 
   if (!Array.isArray(data)) return []
 
-  return data.map((item) => item.permission_code)
+  return data
+    .map((item: any) => item.permissions?.code)
+    .filter((code: string | undefined) => !!code)
 }
 
-// 批量设置角色权限
+// 批量设置角色权限（使用permission_id）
 export async function setRolePermissions(
   roleId: string,
-  permissionCodes: string[]
+  permissionIds: string[]
 ): Promise<{success: boolean; error?: string}> {
   // 1. 删除现有权限
   const {error: deleteError} = await supabase
@@ -269,10 +271,10 @@ export async function setRolePermissions(
   }
 
   // 2. 插入新权限
-  if (permissionCodes.length > 0) {
-    const rolePermissions = permissionCodes.map((code) => ({
+  if (permissionIds.length > 0) {
+    const rolePermissions = permissionIds.map((permissionId) => ({
       role_id: roleId,
-      permission_code: code
+      permission_id: permissionId
     }))
 
     const {error: insertError} = await supabase.from('role_permissions').insert(rolePermissions)
@@ -304,10 +306,10 @@ export async function getUserPermissionCodes(userId: string): Promise<string[]> 
     return []
   }
 
-  // 2. 获取所有角色的权限
+  // 2. 获取所有角色的权限（通过 join permissions 表获取 code）
   const {data: permissions, error: permError} = await supabase
     .from('role_permissions')
-    .select('permission_code')
+    .select('permission_id, permissions(code)')
     .in('role_id', roleIds)
 
   if (permError || !permissions) {
@@ -315,7 +317,10 @@ export async function getUserPermissionCodes(userId: string): Promise<string[]> 
   }
 
   // 3. 去重并返回
-  const uniquePermissions = [...new Set(permissions.map((p) => p.permission_code))]
+  const codes = permissions
+    .map((p: any) => p.permissions?.code)
+    .filter((code: string | undefined) => !!code)
+  const uniquePermissions = [...new Set(codes)]
   return uniquePermissions
 }
 

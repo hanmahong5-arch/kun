@@ -4,7 +4,7 @@ import {Picker} from '@tarojs/components'
 import {withRouteGuard} from '@/components/RouteGuard'
 import {useAuth} from '@/contexts/AuthContext'
 import {supabase} from '@/client/supabase'
-import {getAllProjects, getMyProjects, getAllProfiles, getProjectTrackingRecords} from '@/db/api'
+import {getAllProjects, getTeamProjects, getAllProfiles, getProjectTrackingRecords} from '@/db/api'
 import type {Project, ProjectClassification, ProjectStage} from '@/db/types'
 import {exportToExcel, exportToPDF, type ExportProject} from '@/utils/export'
 
@@ -42,7 +42,7 @@ function Projects() {
       setLoading(true)
       const isLeaderOrAdmin = ['leader', 'system_admin'].includes(profile.role as string)
       const [projectsData, usersData] = await Promise.all([
-        isLeaderOrAdmin ? getAllProjects() : getMyProjects(profile.id as string),
+        isLeaderOrAdmin ? getAllProjects() : getTeamProjects(profile.id as string),
         getAllProfiles()
       ])
       setProjects(Array.isArray(projectsData) ? projectsData : [])
@@ -91,6 +91,7 @@ function Projects() {
     '负责人',
     '工程概况',
     '项目简介',
+    '历史跟踪进展',
     '创建时间',
     '更新时间',
     '项目地址',

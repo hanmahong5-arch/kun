@@ -1,5 +1,5 @@
-import {useState, useMemo, useEffect, useCallback} from 'react'
-import Taro from '@tarojs/taro'
+import {useState, useMemo, useEffect, useCallback, useRef} from 'react'
+import Taro, {useDidHide} from '@tarojs/taro'
 import {Picker} from '@tarojs/components'
 import {useAuth} from '@/contexts/AuthContext'
 import {supabase} from '@/client/supabase'
@@ -10,16 +10,20 @@ export default function CreateReport() {
   const [saving, setSaving] = useState(false)
   const [lastSaveTime, setLastSaveTime] = useState<string>('')
   const [draftId, setDraftId] = useState<string>('')
+  // Submission lock to prevent race condition between auto-save and submit
+  const busyRef = useRef(false)
+  const formDirtyRef = useRef(false)
 
-  // 计算当前周的开始和结束日期
+  // 计算当前周的开始和结束日期（safe: no Date mutation）
   const currentWeek = useMemo(() => {
     const now = new Date()
     const day = now.getDay()
     const diff = now.getDate() - day + (day === 0 ? -6 : 1)
-    const monday = new Date(now.setDate(diff))
+    const monday = new Date(now)
+    monday.setDate(diff)
     const sunday = new Date(monday)
     sunday.setDate(monday.getDate() + 6)
-    
+
     return {
       start: monday.toISOString().split('T')[0],
       end: sunday.toISOString().split('T')[0]
@@ -31,13 +35,18 @@ export default function CreateReport() {
   const [formData, setFormData] = useState<Record<string, string>>({
     work_completed: '',
     project_progress: '',
+    bidding_work: '',
+    customer_contact: '',
     next_week_plan: '',
     issues: ''
   })
 
-  // 保存草稿
+  // 保存草稿（with busy lock to prevent race conditions）
   const handleSaveDraft = useCallback(async (isAuto = false) => {
     if (!profile) return
+    // Skip if another operation is in progress
+    if (busyRef.current) return
+    busyRef.current = true
 
     try {
       setSaving(true)
@@ -46,9 +55,11 @@ export default function CreateReport() {
         user_id: profile.id,
         week_start_date: weekStartDate,
         week_end_date: weekEndDate,
-        core_work: formData.work_completed || null,
-        project_progress: formData.project_progress || null,
-        next_week_plan: formData.next_week_plan || null,
+        core_work: formData.work_completed || '',
+        project_progress: formData.project_progress || '',
+        bidding_work: formData.bidding_work || '',
+        customer_contact: formData.customer_contact || '',
+        next_week_plan: formData.next_week_plan || '',
         issues: formData.issues || null,
         status: 'draft',
         updated_at: new Date().toISOString()
@@ -83,10 +94,12 @@ export default function CreateReport() {
     } catch (error) {
       console.error('保存草稿失败:', error)
       if (!isAuto) {
-        Taro.showToast({title: '保存失败', icon: 'none'})
+        Taro.showToast({title: '保存失败，请检查网络后重试', icon: 'none'})
       }
     } finally {
       setSaving(false)
+      busyRef.current = false
+      formDirtyRef.current = false
     }
   }, [profile, weekStartDate, weekEndDate, formData, draftId])
 
@@ -101,8 +114,16 @@ export default function CreateReport() {
     return () => clearInterval(timer)
   }, [profile, handleSaveDraft])
 
+  // Page leave: auto-save if dirty
+  useDidHide(() => {
+    if (formDirtyRef.current && !busyRef.current) {
+      handleSaveDraft(true)
+    }
+  })
+
   // 更新字段值
   const handleFieldChange = (fieldName: string, value: string) => {
+    formDirtyRef.current = true
     setFormData((prev) => ({
       ...prev,
       [fieldName]: value
@@ -115,19 +136,20 @@ export default function CreateReport() {
     return []
   }
 
-  // 提交周报
+  // 提交周报（with confirmation dialog + busy lock）
   const handleSubmit = async () => {
-    const errors = validateForm()
+    if (busyRef.current || loading) return
 
-    if (errors.length > 0) {
-      Taro.showToast({
-        title: `请填写：${errors.join('、')}`,
-        icon: 'none',
-        duration: 3000
-      })
-      return
-    }
+    // Confirmation dialog for 国央企 users
+    const {confirm} = await Taro.showModal({
+      title: '确认提交',
+      content: `确认提交 ${weekStartDate} 至 ${weekEndDate} 的周报？提交后将进入审核流程，不可自行修改。`,
+      confirmText: '确认提交',
+      cancelText: '继续编辑'
+    })
+    if (!confirm) return
 
+    busyRef.current = true
     try {
       setLoading(true)
 
@@ -135,17 +157,17 @@ export default function CreateReport() {
         user_id: profile?.id,
         week_start_date: weekStartDate,
         week_end_date: weekEndDate,
-        core_work: formData.work_completed || null,
-        project_progress: formData.project_progress || null,
-        next_week_plan: formData.next_week_plan || null,
+        core_work: formData.work_completed || '',
+        project_progress: formData.project_progress || '',
+        bidding_work: formData.bidding_work || '',
+        customer_contact: formData.customer_contact || '',
+        next_week_plan: formData.next_week_plan || '',
         issues: formData.issues || null,
         status: 'pending_review',
-        review_status: 'pending',
-        submitted_at: new Date().toISOString()
+        review_status: 'pending'
       }
 
       if (draftId) {
-        // 更新现有草稿为已提交
         const {error} = await supabase
           .from('weekly_reports')
           .update(reportData)
@@ -153,21 +175,28 @@ export default function CreateReport() {
 
         if (error) throw error
       } else {
-        // 直接提交
         const {error} = await supabase.from('weekly_reports').insert(reportData)
 
         if (error) throw error
       }
 
-      Taro.showToast({title: '提交成功', icon: 'success'})
+      formDirtyRef.current = false
+      Taro.showToast({title: '周报提交成功，等待审核', icon: 'success'})
       setTimeout(() => {
         Taro.navigateBack()
       }, 1500)
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('提交失败:', error)
-      Taro.showToast({title: '提交失败', icon: 'none'})
+      const msg = (error as Error)?.message || '请检查网络连接后重试'
+      Taro.showModal({
+        title: '提交失败',
+        content: msg,
+        showCancel: false,
+        confirmText: '知道了'
+      })
     } finally {
       setLoading(false)
+      busyRef.current = false
     }
   }
 

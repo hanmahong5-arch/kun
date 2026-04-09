@@ -1,10 +1,17 @@
-import {useState, useCallback, useEffect} from 'react'
+import {useState, useCallback, useEffect, useMemo} from 'react'
 import {isAdmin, isLeaderOrAdmin} from '@/db/permissions-utils'
 import Taro, {useDidShow} from '@tarojs/taro'
 import {withRouteGuard} from '@/components/RouteGuard'
 import {useAuth} from '@/contexts/AuthContext'
 import {getDocuments, deleteDocument, uploadDocument, createDocument} from '@/db/documents'
 import type {Document} from '@/db/types'
+
+const DEFAULT_CATEGORIES = [
+  {value: 'standard', label: '标准规范'},
+  {value: 'template', label: '模板文档'},
+  {value: 'manual', label: '操作手册'},
+  {value: 'other', label: '其他'}
+]
 
 function DocumentsPage() {
   const {profile} = useAuth()
@@ -13,18 +20,27 @@ function DocumentsPage() {
   const [category, setCategory] = useState<string>('all')
   const [search, setSearch] = useState('')
   const [sortBy, setSortBy] = useState<'created_at' | 'file_size' | 'name'>('created_at')
+  const [showCategoryPicker, setShowCategoryPicker] = useState(false)
+  const [newCategoryName, setNewCategoryName] = useState('')
+  const [pendingFile, setPendingFile] = useState<{data: any; name: string; type: string; size: number; isH5: boolean} | null>(null)
 
   const canManage =
     isAdmin(profile) ||
     profile?.role === 'data_clerk'
 
-  const categories = [
-    {value: 'all', label: '全部'},
-    {value: 'standard', label: '标准规范'},
-    {value: 'template', label: '模板文档'},
-    {value: 'manual', label: '操作手册'},
-    {value: 'other', label: '其他'}
-  ]
+  // Merge default categories with custom ones from existing documents
+  const allCategories = useMemo(() => {
+    const customCats = documents
+      .map((d) => d.category)
+      .filter((c) => c && !DEFAULT_CATEGORIES.some((dc) => dc.value === c))
+    const uniqueCustom = [...new Set(customCats)]
+    return [
+      ...DEFAULT_CATEGORIES,
+      ...uniqueCustom.map((c) => ({value: c, label: c}))
+    ]
+  }, [documents])
+
+  const categories = [{value: 'all', label: '全部'}, ...allCategories]
 
   const loadData = useCallback(async () => {
     try {
@@ -56,9 +72,82 @@ function DocumentsPage() {
     return categories.find((c) => c.value === cat)?.label || cat
   }
 
-  const handleUpload = async () => {
+  const isH5 = Taro.getEnv() === Taro.ENV_TYPE.WEB
+
+  // H5 file input ref handler
+  const handleFileInputChange = (e: any) => {
+    const file = e.target?.files?.[0]
+    if (!file) return
+    if (!validateFile(file.name, file.size)) {
+      e.target.value = ''
+      return
+    }
+    setPendingFile({data: file, name: file.name, type: file.type, size: file.size, isH5: true})
+    setShowCategoryPicker(true)
+    e.target.value = ''
+  }
+
+  const validateFile = (fileName: string, fileSize: number): boolean => {
+    if (fileSize > 10 * 1024 * 1024) {
+      Taro.showToast({title: '文件大小不能超过10MB', icon: 'none'})
+      return false
+    }
+    const allowedExtensions = ['.pdf', '.doc', '.docx', '.xls', '.xlsx']
+    const ext = fileName.toLowerCase().substring(fileName.lastIndexOf('.'))
+    if (!allowedExtensions.includes(ext)) {
+      Taro.showToast({title: '仅支持PDF、Word、Excel格式', icon: 'none'})
+      return false
+    }
+    return true
+  }
+
+  const handleSelectCategory = async (selectedCategory: string) => {
+    if (!pendingFile) return
+    setShowCategoryPicker(false)
+    setNewCategoryName('')
+
     try {
-      // 选择文件
+      Taro.showLoading({title: '上传中...'})
+
+      if (!profile?.id) {
+        throw new Error('用户未登录')
+      }
+
+      const uploadPayload = pendingFile.isH5 ? pendingFile.data : {tempFilePath: pendingFile.data, name: pendingFile.name, type: pendingFile.type}
+      const {data: uploadData, error: uploadError} = await uploadDocument(uploadPayload, profile.id as string)
+
+      if (uploadError || !uploadData) throw uploadError
+
+      const {error: createError} = await createDocument({
+        name: pendingFile.name,
+        category: selectedCategory,
+        file_size: pendingFile.size,
+        file_path: uploadData.path,
+        file_type: pendingFile.type,
+        uploaded_by: profile.id as string
+      })
+
+      if (createError) throw createError
+
+      Taro.showToast({title: '上传成功', icon: 'success'})
+      setPendingFile(null)
+      loadData()
+    } catch (error) {
+      console.error('上传文档失败:', error)
+      Taro.showToast({title: '上传失败', icon: 'none'})
+    } finally {
+      Taro.hideLoading()
+    }
+  }
+
+  const handleUpload = async () => {
+    if (isH5) {
+      const input = document.getElementById('doc-file-input')
+      if (input) input.click()
+      return
+    }
+
+    try {
       const res = await Taro.chooseMessageFile({
         count: 1,
         type: 'file'
@@ -67,72 +156,11 @@ function DocumentsPage() {
       if (!res.tempFiles || res.tempFiles.length === 0) return
 
       const file = res.tempFiles[0]
-
-      // 检查文件大小（10MB限制）
-      if (file.size > 10 * 1024 * 1024) {
-        Taro.showToast({title: '文件大小不能超过10MB', icon: 'none'})
-        return
-      }
-
-      // 检查文件类型
-      const allowedTypes = [
-        'application/pdf',
-        'application/msword',
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        'application/vnd.ms-excel',
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-      ]
-
-      if (!allowedTypes.includes(file.type)) {
-        Taro.showToast({title: '仅支持PDF、Word、Excel格式', icon: 'none'})
-        return
-      }
-
-      // 选择分类
-      const categoryRes = await Taro.showActionSheet({
-        itemList: ['标准规范', '模板文档', '操作手册', '其他']
-      })
-
-      const categoryMap = ['standard', 'template', 'manual', 'other']
-      const selectedCategory = categoryMap[categoryRes.tapIndex]
-
-      Taro.showLoading({title: '上传中...'})
-
-      if (!profile?.id) {
-        throw new Error('用户未登录')
-      }
-
-      // 上传文件
-      const {data: uploadData, error: uploadError} = await uploadDocument(
-        {
-          tempFilePath: file.path,
-          name: file.name,
-          type: file.type
-        },
-        profile.id as string
-      )
-
-      if (uploadError || !uploadData) throw uploadError
-
-      // 创建文档记录
-      const {error: createError} = await createDocument({
-        name: file.name,
-        category: selectedCategory,
-        file_size: file.size,
-        file_path: uploadData.path,
-        file_type: file.type,
-        uploaded_by: profile.id as string
-      })
-
-      if (createError) throw createError
-
-      Taro.showToast({title: '上传成功', icon: 'success'})
-      loadData()
+      if (!validateFile(file.name, file.size)) return
+      setPendingFile({data: file.path, name: file.name, type: file.type, size: file.size, isH5: false})
+      setShowCategoryPicker(true)
     } catch (error) {
-      console.error('上传文档失败:', error)
-      Taro.showToast({title: '上传失败', icon: 'none'})
-    } finally {
-      Taro.hideLoading()
+      console.error('选择文件失败:', error)
     }
   }
 
@@ -177,6 +205,16 @@ function DocumentsPage() {
 
   return (
     <div className="min-h-screen bg-background pb-6">
+      {/* H5 hidden file input */}
+      {isH5 && (
+        <input
+          id="doc-file-input"
+          type="file"
+          accept=".pdf,.doc,.docx,.xls,.xlsx"
+          onChange={handleFileInputChange}
+          style={{display: 'none'}}
+        />
+      )}
       {/* 头部 */}
       <div className="bg-gradient-primary px-6 py-6">
         <div className="flex items-center justify-between">
@@ -320,6 +358,63 @@ function DocumentsPage() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Category picker modal */}
+      {showCategoryPicker && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-end justify-center">
+          <div className="w-full max-w-lg bg-card rounded-t-xl p-6 animate-slide-up">
+            <div className="text-xl text-foreground font-bold mb-4">选择文件类型</div>
+
+            <div className="flex flex-wrap gap-2 mb-4">
+              {allCategories.map((cat) => (
+                <button
+                  key={cat.value}
+                  type="button"
+                  onClick={() => handleSelectCategory(cat.value)}
+                  className="px-4 py-2 bg-muted rounded text-base text-foreground border border-border">
+                  {cat.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="text-base text-muted-foreground mb-2">或创建新类型</div>
+            <div className="flex gap-2">
+              <div className="flex-1 border-2 border-input rounded px-3 py-2 bg-background">
+                <input
+                  type="text"
+                  value={newCategoryName}
+                  onChange={(e) => setNewCategoryName(e.target.value)}
+                  placeholder="输入新类型名称"
+                  className="w-full text-base text-foreground bg-transparent outline-none"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!newCategoryName.trim()) {
+                    Taro.showToast({title: '请输入类型名称', icon: 'none'})
+                    return
+                  }
+                  handleSelectCategory(newCategoryName.trim())
+                }}
+                className="px-4 py-2 bg-primary text-primary-foreground text-base rounded">
+                确定
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setShowCategoryPicker(false)
+                setPendingFile(null)
+                setNewCategoryName('')
+              }}
+              className="w-full mt-4 py-3 bg-muted text-muted-foreground text-base rounded">
+              取消
+            </button>
+          </div>
         </div>
       )}
     </div>

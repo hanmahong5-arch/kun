@@ -1,5 +1,5 @@
-import {useState, useEffect, useMemo, useCallback} from 'react'
-import Taro from '@tarojs/taro'
+import {useState, useEffect, useMemo, useCallback, useRef} from 'react'
+import Taro, {useDidHide} from '@tarojs/taro'
 import {useAuth} from '@/contexts/AuthContext'
 import {supabase} from '@/client/supabase'
 
@@ -32,8 +32,11 @@ export default function EditReport() {
   const [weekEndDate, setWeekEndDate] = useState('')
   const [coreWork, setCoreWork] = useState('') // 工作完成情况
   const [projectProgress, setProjectProgress] = useState('') // 主要项目推进进展
+  const [biddingWork, setBiddingWork] = useState('') // 投标工作
+  const [customerContact, setCustomerContact] = useState('') // 客户联系情况
   const [nextWeekPlan, setNextWeekPlan] = useState('') // 下周工作计划
   const [issues, setIssues] = useState('') // 存在问题及协调需求
+  const busyRef = useRef(false)
 
   useEffect(() => {
     if (!reportId || !profile) return
@@ -61,6 +64,8 @@ export default function EditReport() {
         setWeekEndDate(data.week_end_date)
         setCoreWork(data.core_work || '')
         setProjectProgress(data.project_progress || '')
+        setBiddingWork(data.bidding_work || '')
+        setCustomerContact(data.customer_contact || '')
         setNextWeekPlan(data.next_week_plan || '')
         setIssues(data.issues || '')
       } catch (error) {
@@ -84,14 +89,16 @@ export default function EditReport() {
         .update({
           week_start_date: weekStartDate,
           week_end_date: weekEndDate,
-          core_work: coreWork || null,
-          project_progress: projectProgress || null,
-          next_week_plan: nextWeekPlan || null,
+          core_work: coreWork || '',
+          project_progress: projectProgress || '',
+          bidding_work: biddingWork || '',
+          customer_contact: customerContact || '',
+          next_week_plan: nextWeekPlan || '',
           issues: issues || null,
           status: 'draft'
         })
         .eq('id', report.id)
-      
+
       if (error) throw error
 
       const now = new Date()
@@ -99,7 +106,7 @@ export default function EditReport() {
     } catch (error) {
       console.error('自动保存失败:', error)
     }
-  }, [report, weekStartDate, weekEndDate, coreWork, projectProgress, nextWeekPlan, issues])
+  }, [report, weekStartDate, weekEndDate, coreWork, projectProgress, biddingWork, customerContact, nextWeekPlan, issues])
 
   // 设置自动保存定时器
   useEffect(() => {
@@ -131,10 +138,19 @@ export default function EditReport() {
     }
   }
 
-  // 提交周报
+  // 提交周报（with confirmation + lock）
   const handleSubmit = async () => {
-    if (!report) return
+    if (!report || busyRef.current || saving) return
 
+    const {confirm} = await Taro.showModal({
+      title: '确认提交',
+      content: `确认提交 ${weekStartDate} 至 ${weekEndDate} 的周报？提交后将进入审核流程。`,
+      confirmText: '确认提交',
+      cancelText: '继续编辑'
+    })
+    if (!confirm) return
+
+    busyRef.current = true
     setSaving(true)
     try {
       const {error} = await supabase
@@ -142,27 +158,30 @@ export default function EditReport() {
         .update({
           week_start_date: weekStartDate,
           week_end_date: weekEndDate,
-          core_work: coreWork || null,
-          project_progress: projectProgress || null,
-          next_week_plan: nextWeekPlan || null,
+          core_work: coreWork || '',
+          project_progress: projectProgress || '',
+          bidding_work: biddingWork || '',
+          customer_contact: customerContact || '',
+          next_week_plan: nextWeekPlan || '',
           issues: issues || null,
           status: 'pending_review',
-          review_status: 'pending',
-          submitted_at: new Date().toISOString()
+          review_status: 'pending'
         })
         .eq('id', report.id)
 
       if (error) throw error
 
-      Taro.showToast({title: '提交成功', icon: 'success'})
+      Taro.showToast({title: '周报提交成功，等待审核', icon: 'success'})
       setTimeout(() => {
         Taro.navigateBack()
       }, 1500)
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('提交失败:', error)
-      Taro.showToast({title: '提交失败', icon: 'none'})
+      const msg = (error as Error)?.message || '请检查网络连接后重试'
+      Taro.showModal({title: '提交失败', content: msg, showCancel: false, confirmText: '知道了'})
     } finally {
       setSaving(false)
+      busyRef.current = false
     }
   }
 
