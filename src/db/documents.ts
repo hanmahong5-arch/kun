@@ -1,6 +1,8 @@
 import {supabase} from '@/client/supabase'
 import type {Document} from './types'
 
+const STORAGE_BUCKET = 'app-aqrho2yuzfnl_documents'
+
 // 获取文档列表
 export async function getDocuments(params?: {
   category?: string
@@ -30,6 +32,22 @@ export async function getDocuments(params?: {
   } catch (error) {
     console.error('获取文档列表失败:', error)
     return {data: [], error}
+  }
+}
+
+// Fetch all distinct categories from documents table
+export async function getDocumentCategories(): Promise<string[]> {
+  try {
+    const {data, error} = await supabase
+      .from('documents')
+      .select('category')
+
+    if (error) throw error
+    const cats = [...new Set((data || []).map((d) => d.category).filter(Boolean))]
+    return cats
+  } catch (error) {
+    console.error('获取文档分类失败:', error)
+    return []
   }
 }
 
@@ -74,7 +92,7 @@ export async function createDocument(doc: {
 export async function deleteDocument(id: string, filePath: string) {
   try {
     // 删除存储文件
-    const {error: storageError} = await supabase.storage.from('documents').remove([filePath])
+    const {error: storageError} = await supabase.storage.from(STORAGE_BUCKET).remove([filePath])
 
     if (storageError) throw storageError
 
@@ -90,6 +108,12 @@ export async function deleteDocument(id: string, filePath: string) {
   }
 }
 
+// Get public download URL for a document
+export function getDocumentUrl(filePath: string): string {
+  const {data} = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(filePath)
+  return data.publicUrl
+}
+
 // 上传文档到Storage
 export async function uploadDocument(file: File | {tempFilePath: string; name: string; type: string}, userId: string) {
   try {
@@ -99,7 +123,7 @@ export async function uploadDocument(file: File | {tempFilePath: string; name: s
     if ('tempFilePath' in file) {
       // 小程序环境
       const {data, error} = await supabase.storage
-        .from('documents')
+        .from(STORAGE_BUCKET)
         .upload(fileName, file.tempFilePath as any, {
           contentType: file.type,
           upsert: false
@@ -109,7 +133,7 @@ export async function uploadDocument(file: File | {tempFilePath: string; name: s
     } else {
       // H5环境
       const {data, error} = await supabase.storage
-        .from('documents')
+        .from(STORAGE_BUCKET)
         .upload(fileName, file, {
           contentType: file.type,
           upsert: false
@@ -120,7 +144,7 @@ export async function uploadDocument(file: File | {tempFilePath: string; name: s
 
     if (!uploadData) throw new Error('上传失败')
 
-    const {data: urlData} = supabase.storage.from('documents').getPublicUrl(uploadData.path)
+    const {data: urlData} = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(uploadData.path)
 
     return {
       data: {
