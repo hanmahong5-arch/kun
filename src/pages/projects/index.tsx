@@ -586,6 +586,23 @@ function Projects() {
           )}
         </div>
       )}
+      {/* Active filter indicator from dashboard navigation */}
+      {stageFilter && (
+        <div className="px-6 py-3 bg-primary/10 flex items-center justify-between">
+          <div className="text-base text-primary flex items-center gap-2">
+            <div className="i-mdi-filter text-xl" />
+            <span>已筛选: <span className="font-bold">{stageFilter}</span></span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setStageFilter('')}
+            className="text-sm text-primary flex items-center gap-1">
+            <div className="i-mdi-close text-base" />
+            清除
+          </button>
+        </div>
+      )}
+
       {/* 统计看板 */}
       <div className="px-6 py-4 bg-card">
         <div className="grid grid-cols-3 gap-3">

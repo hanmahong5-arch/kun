@@ -403,7 +403,7 @@ function Home() {
     <div className="min-h-screen bg-background pb-6">
       {/* 头部 */}
       <div className="bg-gradient-primary px-6 py-6">
-        <div className="text-2xl text-primary-foreground font-bold">市场经营管理</div>
+        <div className="text-2xl text-primary-foreground font-bold">智通经纬</div>
         <div className="text-base text-primary-foreground/80 mt-1">欢迎回来，{String(profile?.name || '用户')}</div>
       </div>
 
@@ -488,7 +488,7 @@ function Home() {
       <div className="px-6 mt-4">
         <div className="text-xl text-foreground font-bold mb-3">快捷入口</div>
         <div className="grid grid-cols-3 gap-3">
-          {/* 领导角色：只显示数据中心和知识库 */}
+          {/* 领导角色：数据中心为主，加上常用入口 */}
           {isLeaderRole ? (
             <>
               <button
@@ -497,6 +497,34 @@ function Home() {
                 className="py-4 bg-gradient-primary rounded flex flex-col items-center justify-center gap-2 border border-primary/20">
                 <div className="i-mdi-chart-box text-3xl text-primary-foreground" />
                 <span className="text-base text-primary-foreground font-bold">数据中心</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => Taro.navigateTo({url: '/pages/projects/analytics/index'})}
+                className="py-4 bg-card border-2 border-border rounded flex flex-col items-center justify-center gap-2">
+                <div className="i-mdi-chart-timeline-variant text-3xl text-primary" />
+                <span className="text-base text-foreground">项目分析</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => Taro.navigateTo({url: '/pages/customers/analytics/index'})}
+                className="py-4 bg-card border-2 border-border rounded flex flex-col items-center justify-center gap-2">
+                <div className="i-mdi-account-search text-3xl text-primary" />
+                <span className="text-base text-foreground">客户分析</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => Taro.navigateTo({url: '/pages/bids/index'})}
+                className="py-4 bg-card border-2 border-border rounded flex flex-col items-center justify-center gap-2">
+                <div className="i-mdi-gavel text-3xl text-primary" />
+                <span className="text-base text-foreground">投标记录</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => Taro.navigateTo({url: '/pages/reports/review/index'})}
+                className="py-4 bg-card border-2 border-border rounded flex flex-col items-center justify-center gap-2">
+                <div className="i-mdi-file-document-edit text-3xl text-primary" />
+                <span className="text-base text-foreground">汇报审阅</span>
               </button>
               <button
                 type="button"
@@ -583,7 +611,7 @@ function Home() {
       </div>
 
       {/* 任务统计看板（仅领导可见） */}
-      {isLeader && (
+      {isLeaderRole && (
         <div className="px-6 mt-4 mb-6">
           <div className="bg-card rounded p-5 border border-border">
             <div className="flex items-center justify-between mb-4">
